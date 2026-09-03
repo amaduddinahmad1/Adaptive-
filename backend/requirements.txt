@@ -1,0 +1,14 @@
+# Adaptive Multimodal AI Interview & Candidate Assessment System
+# Backend Dependencies
+#
+# Do NOT add packages until the team agrees on versions.
+# Each team member should propose dependencies via PR.
+#
+# Planned (not yet added):
+# - fastapi
+# - uvicorn
+# - pydantic
+# - python-dotenv
+# - google-generativeai
+# - livekit-api
+# - pipecat-ai

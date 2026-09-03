@@ -1,0 +1,5 @@
+{
+  "version": "0.1.0",
+  "description": "Gap analysis comparing candidate skills against job requirements. Produced by Assessment (Faizan), consumed by Report UI (Jazib).",
+  "data": {}
+}
