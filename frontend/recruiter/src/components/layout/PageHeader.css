@@ -1,0 +1,8 @@
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-xl);
+}
+.page-title { font-size: 1.5rem; font-weight: 700; color: var(--color-text-primary); margin-bottom: var(--spacing-xs); }
+.page-description { color: var(--color-text-secondary); font-size: 0.95rem; }

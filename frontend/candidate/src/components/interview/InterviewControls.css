@@ -1,0 +1,5 @@
+.interview-controls {
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-4);
+}

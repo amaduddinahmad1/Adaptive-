@@ -1,0 +1,78 @@
+.interview-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: var(--bg-color);
+  overflow: hidden;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: var(--spacing-4);
+  color: var(--text-secondary);
+}
+
+.interview-main-area {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: var(--spacing-6);
+  padding: var(--spacing-6);
+  overflow: hidden;
+}
+
+.interview-left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-6);
+}
+
+.question-area {
+  flex: 1;
+}
+
+.mic-area {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--spacing-6);
+}
+
+.interview-right-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.interview-footer-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--spacing-4) var(--spacing-6);
+  border-top: 1px solid var(--border-color);
+  background-color: var(--surface-color);
+}
+
+.status-container {
+  flex: 1;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 900px) {
+  .interview-main-area {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  
+  .interview-left-panel {
+    min-height: 50vh;
+  }
+  
+  .interview-right-panel {
+    min-height: 400px;
+  }
+}

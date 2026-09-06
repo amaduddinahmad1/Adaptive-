@@ -1,0 +1,7 @@
+.activity-card { flex: 1; }
+.activity-list { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.activity-item { display: flex; gap: var(--spacing-md); align-items: flex-start; }
+.activity-icon { font-size: 1.25rem; }
+.activity-details { flex: 1; }
+.activity-text { font-size: 0.875rem; font-weight: 500; color: var(--color-text-primary); }
+.activity-time { font-size: 0.75rem; color: var(--color-text-secondary); margin-top: 2px; }

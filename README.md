@@ -22,6 +22,50 @@ Recruiter creates job → JD Analysis → Requirement Profile
 | **Faizan** | Interview Intelligence, Question Generation, CV Claim Verification, Adaptive Difficulty, Assessment & Scoring, Gap Analysis |
 | **Jazib** | Voice Interview (LiveKit + Pipecat), STT, TTS, Candidate Interview UI, Recruiter Dashboard, Final Report UI |
 
+## Current Status
+
+🏗️ **Day 1 Complete** — Voice foundation, candidate interview UI, and recruiter dashboard shell implemented.
+
+### What's Implemented (Day 1)
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| STT Abstraction | ✅ Foundation | Abstract provider + mock implementation |
+| TTS Abstraction | ✅ Foundation | Abstract provider + mock implementation |
+| LiveKit Foundation | ✅ Foundation | Config + service structure (SDK pending) |
+| Pipecat Foundation | ✅ Foundation | Pipeline + interview bridge structure |
+| Voice Service | ✅ Foundation | Session management, pipeline coordination |
+| Voice Schemas | ✅ Complete | Session, STT, TTS schemas with enums |
+| API Routes | ✅ Foundation | Voice session CRUD endpoints |
+| Candidate UI | ✅ Complete | Premium interview interface with mock demo |
+| Recruiter Dashboard | ✅ Complete | Dashboard shell with mock data |
+| Backend Tests | ✅ Basic | Schema, STT, TTS, voice service tests |
+| Documentation | ✅ Complete | Architecture, API, voice docs |
+
+### What's Mocked
+
+- STT transcription (returns placeholder text)
+- TTS synthesis (returns placeholder audio bytes)
+- LiveKit room/token management (placeholder methods)
+- Pipecat pipeline processing (structural foundation)
+- Interview Intelligence (mock bridge interface)
+- Session storage (in-memory dict)
+- Frontend API calls (mock data in hooks/services)
+
+### What's NOT Implemented
+
+- Real STT/TTS provider integrations
+- LiveKit SDK integration
+- Pipecat SDK integration
+- JD Intelligence (Amad)
+- CV Intelligence (Amad)
+- Eligibility Engine (Amad)
+- Interview Intelligence (Faizan)
+- Assessment & Scoring (Faizan)
+- Database persistence
+- Authentication
+- Real-time WebSocket updates
+
 ## Repository Structure
 
 ```
@@ -30,26 +74,27 @@ Recruiter creates job → JD Analysis → Requirement Profile
 │   │   ├── api/routes/       → API endpoint definitions
 │   │   ├── core/             → Configuration, settings, utilities
 │   │   ├── models/           → Database models
-│   │   ├── schemas/          → Pydantic schemas
+│   │   ├── schemas/          → Pydantic schemas (voice, STT, TTS)
 │   │   ├── services/         → Business logic modules
-│   │   │   ├── jd_intelligence/       (Amad)
-│   │   │   ├── cv_intelligence/       (Amad)
-│   │   │   ├── eligibility/           (Amad)
-│   │   │   ├── interview_intelligence/ (Faizan)
-│   │   │   └── assessment/            (Faizan)
+│   │   │   ├── voice/        → Voice interview coordination (Jazib) ★
+│   │   │   ├── jd_intelligence/       (Amad — not started)
+│   │   │   ├── cv_intelligence/       (Amad — not started)
+│   │   │   ├── eligibility/           (Amad — not started)
+│   │   │   ├── interview_intelligence/ (Faizan — not started)
+│   │   │   └── assessment/            (Faizan — not started)
 │   │   ├── integrations/     → External service integrations
 │   │   │   ├── llm/          → LLM provider (model agnostic)
-│   │   │   ├── stt/          → Speech-to-Text (provider agnostic)
-│   │   │   ├── tts/          → Text-to-Speech (provider agnostic)
-│   │   │   ├── livekit/      → Real-time audio transport
-│   │   │   └── pipecat/      → STT→LLM→TTS orchestration
+│   │   │   ├── stt/          → Speech-to-Text (provider agnostic) ★
+│   │   │   ├── tts/          → Text-to-Speech (provider agnostic) ★
+│   │   │   ├── livekit/      → Real-time audio transport ★
+│   │   │   └── pipecat/      → STT→LLM→TTS orchestration ★
 │   │   ├── db/               → Database configuration
 │   │   └── main.py           → Application entry point
-│   └── tests/
+│   └── tests/                → Backend tests ★
 │
 ├── frontend/          → Frontend applications
-│   ├── candidate/            → Candidate interview UI (Jazib)
-│   └── recruiter/            → Recruiter dashboard (Jazib)
+│   ├── candidate/            → Candidate interview UI (Vite + React) ★
+│   └── recruiter/            → Recruiter dashboard (Vite + React) ★
 │
 ├── voice_lab/         → Experimental STT/TTS/transliteration sandbox
 │
@@ -57,8 +102,8 @@ Recruiter creates job → JD Analysis → Requirement Profile
 │   ├── contracts/            → JSON integration contracts
 │   └── sample_data/          → Test data for development
 │
-├── docs/              → Documentation
-│   ├── architecture/         → System architecture
+├── docs/              → Documentation ★
+│   ├── architecture/         → System + voice architecture
 │   ├── api/                  → API documentation
 │   └── project/              → Project overview
 │
@@ -66,6 +111,8 @@ Recruiter creates job → JD Analysis → Requirement Profile
 ├── README.md
 └── LICENSE
 ```
+
+Items marked with ★ were created/updated in Day 1.
 
 ## Shared Contracts
 
@@ -92,12 +139,54 @@ Recruiter creates job → JD Analysis → Requirement Profile
 - **No facial analysis** or autonomous hiring decisions
 - Final hiring decisions remain with the **human recruiter**
 
-## Current Status
-
-🏗️ **Initial project structure only** — no business logic has been implemented yet.
-
 ## Getting Started
 
-1. Clone the repository
-2. Copy `backend/.env.example` to `backend/.env` and fill in your values
-3. Check each module's README for specific setup instructions
+### Backend
+```bash
+cd backend
+# Create virtual environment
+python -m venv venv
+# Activate (Windows)
+venv\Scripts\activate
+# Install dependencies (when requirements are finalized)
+# pip install -r requirements.txt
+# Copy and configure environment
+cp .env.example .env
+# Run tests
+# python -m pytest tests/
+```
+
+### Frontend — Candidate
+```bash
+cd frontend/candidate
+npm install
+npm run dev     # Development server
+npm run build   # Production build
+```
+
+### Frontend — Recruiter
+```bash
+cd frontend/recruiter
+npm install
+npm run dev     # Development server
+npm run build   # Production build
+```
+
+## Day 2 Planning
+
+### Jazib
+- Integrate real LiveKit SDK for room/token management
+- Evaluate and select STT provider (test in voice_lab first)
+- Evaluate and select TTS provider (test in voice_lab first)
+- Begin Pipecat SDK integration for pipeline orchestration
+- Connect candidate UI to real backend API
+
+### Amad
+- Begin JD Intelligence implementation
+- Begin CV Intelligence implementation
+- Define eligibility criteria schema
+
+### Faizan
+- Begin Interview Intelligence implementation
+- Implement InterviewBridge interface
+- Define question generation strategy

@@ -1,0 +1,8 @@
+.connection-status {
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--surface-color);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  display: inline-flex;
+  font-size: 0.75rem;
+}

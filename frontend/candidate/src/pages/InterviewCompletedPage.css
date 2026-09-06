@@ -1,0 +1,51 @@
+.completed-page {
+  justify-content: center;
+  align-items: center;
+}
+
+.completed-card {
+  max-width: 600px;
+  width: 100%;
+  text-align: center;
+  padding: var(--spacing-10) var(--spacing-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.completed-icon {
+  font-size: 4rem;
+  margin-bottom: var(--spacing-4);
+}
+
+.completed-title {
+  font-size: 2rem;
+  margin-bottom: var(--spacing-4);
+  color: var(--primary-accent);
+}
+
+.completed-message {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  margin-bottom: var(--spacing-8);
+  line-height: 1.6;
+}
+
+.completed-details {
+  background-color: var(--surface-elevated);
+  padding: var(--spacing-6);
+  border-radius: var(--radius-md);
+  text-align: left;
+  width: 100%;
+}
+
+.completed-details h3 {
+  margin-bottom: var(--spacing-2);
+  color: var(--text-primary);
+}
+
+.completed-details p {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}

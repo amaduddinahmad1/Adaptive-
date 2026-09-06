@@ -1,0 +1,18 @@
+.topbar {
+  height: 64px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--spacing-xl);
+}
+.search-input {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  width: 300px;
+  font-size: 0.875rem;
+}
+.search-input:focus { outline: none; border-color: var(--color-primary); }
+.action-btn { background: none; border: none; font-size: 1.25rem; cursor: pointer; }

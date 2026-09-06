@@ -1,0 +1,7 @@
+.pipeline-card { flex: 2; }
+.card-title { font-size: 1.125rem; font-weight: 600; margin-bottom: var(--spacing-lg); border-bottom: 1px solid var(--color-border); padding-bottom: var(--spacing-sm); }
+.pipeline-stages { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.stage-header { display: flex; justify-content: space-between; margin-bottom: var(--spacing-xs); font-size: 0.875rem; font-weight: 500; }
+.stage-count { color: var(--color-text-secondary); }
+.stage-bar { height: 8px; background: var(--color-background); border-radius: var(--radius-full); overflow: hidden; }
+.stage-progress { height: 100%; border-radius: var(--radius-full); }

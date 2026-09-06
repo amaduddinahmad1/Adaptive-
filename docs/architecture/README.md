@@ -52,3 +52,8 @@ Recruiter Dashboard          ← Jazib
 - **Human-in-the-loop**: Final hiring decisions remain with the human recruiter.
 - **No facial analysis**: Computer vision / facial emotion analysis is NOT part of the current implementation.
 - **Separation of concerns**: voice_lab is experimental and separate from production integrations.
+- **Observable indicators only**: Use behavioral indicators (speech clarity, response articulation) not psychological labels.
+
+## Detailed Architecture
+
+For voice-specific architecture, see [voice_architecture.md](./voice_architecture.md).

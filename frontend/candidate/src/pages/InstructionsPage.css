@@ -1,0 +1,82 @@
+.page-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-6);
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.instructions-page {
+  justify-content: center;
+  align-items: center;
+}
+
+.instructions-content {
+  width: 100%;
+  max-width: 600px;
+}
+
+.instructions-title {
+  font-size: 2rem;
+  margin-bottom: var(--spacing-2);
+  text-align: center;
+}
+
+.instructions-subtitle {
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: var(--spacing-8);
+}
+
+.instructions-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-6);
+}
+
+.instruction-section h3 {
+  font-size: 1.125rem;
+  margin-bottom: var(--spacing-3);
+  color: var(--primary-accent);
+}
+
+.instruction-section ul {
+  padding-left: var(--spacing-5);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.system-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  background-color: var(--surface-elevated);
+  padding: var(--spacing-4);
+  border-radius: var(--radius-md);
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  font-size: 0.9375rem;
+}
+
+.check-item.success {
+  color: var(--text-primary);
+}
+
+.check-icon {
+  color: var(--success-color);
+  font-weight: bold;
+}
+
+.instructions-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--spacing-4);
+}
