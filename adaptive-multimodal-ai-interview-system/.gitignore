@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (frontend)
+node_modules/
+.next/
+out/
+.nuxt/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Voice Lab outputs
+voice_lab/tts/outputs/*.wav
+voice_lab/tts/outputs/*.mp3
+voice_lab/stt/samples/*.wav
+voice_lab/stt/samples/*.mp3
+
+# Logs
+*.log
+logs/
+
+# Misc
+*.bak
+*.tmp

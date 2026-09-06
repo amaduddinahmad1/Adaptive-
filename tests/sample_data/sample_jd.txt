@@ -1,0 +1,40 @@
+Job Title: Senior Python Backend Engineer
+Location: Remote
+Department: Engineering
+Employment Type: Full-time
+
+About the Role:
+We are seeking a talented Senior Python Backend Engineer to build high-performance APIs and microservices.
+
+Key Responsibilities:
+- Design, build, and maintain scalable RESTful APIs and backend services.
+- Collaborate with frontend and AI engineering teams.
+- Optimize database queries and asynchronous pipelines.
+
+Requirements:
+
+Experience:
+- Minimum 3 years of professional software development experience (general).
+- Minimum 2 years of hands-on Python development experience.
+- Minimum 1 year of hands-on experience with FastAPI.
+
+Required Skills & Technologies:
+- Python
+- FastAPI
+- PostgreSQL
+- REST APIs
+- Git
+
+Preferred Skills & Technologies:
+- Docker
+- Redis
+- LiveKit / WebRTC
+- Kubernetes
+
+Education & Certifications:
+- Bachelor's degree in Computer Science, Software Engineering, or related field (Mandatory).
+- AWS Certified Developer or equivalent cloud certification (Preferred).
+
+Other Mandatory Requirements:
+- Candidate must be available to join within 30 days.
+- Target Salary Range: $70,000 - $90,000 per year.
