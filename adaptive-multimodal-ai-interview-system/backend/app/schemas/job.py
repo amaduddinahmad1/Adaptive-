@@ -6,7 +6,7 @@ Directly maps to the 10 core qualification criteria for eligibility evaluation.
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 
 # Known limitations deferred for the eligibility-engine design review:
@@ -140,4 +140,61 @@ class JobRequirementProfile(BaseModel):
     other_mandatory_requirements: List[str] = Field(
         default_factory=list,
         description="Any additional non-negotiable requirements (e.g., 'Must be eligible to work in the US')"
+    )
+
+
+class RequirementCategory(str, Enum):
+    """Whether a requirement is non-negotiable or nice-to-have."""
+    MANDATORY = "mandatory"
+    PREFERRED = "preferred"
+
+
+class RequirementType(str, Enum):
+    """What kind of requirement this is, for downstream grouping/filtering."""
+    EXPERIENCE = "experience"
+    SKILL = "skill"
+    TECHNOLOGY = "technology"
+    EDUCATION = "education"
+    CERTIFICATION = "certification"
+    DOMAIN = "domain"
+    OTHER = "other"
+
+
+class ClassifiedRequirement(BaseModel):
+    """
+    A single normalized requirement, flattened out of JobRequirementProfile.
+
+    Produced by requirement_classifier.classify_requirements() — this does not
+    re-derive mandatory/preferred status; it reads what Day 1's JD parsing
+    already determined (is_mandatory flags, required_* vs preferred_* list
+    placement) and restates it in one uniform shape.
+
+    Note for consumers: to know which concrete type source_detail holds (or
+    whether it's populated at all), branch on requirement_type rather than
+    isinstance(source_detail, ...). requirement_type and source_detail's type
+    always agree by construction, and checking the enum keeps consumers using
+    the same discriminator the classifier itself uses, instead of a structural
+    check that duplicates that logic.
+    """
+    requirement: str = Field(
+        ...,
+        description="Human-readable requirement text (e.g. 'Python', 'Bachelor's in Computer Science', '3 years professional experience')"
+    )
+    category: RequirementCategory = Field(
+        ...,
+        description="'mandatory' or 'preferred', as determined during JD parsing"
+    )
+    requirement_type: RequirementType = Field(
+        ...,
+        description="What kind of requirement this is (experience, skill, technology, education, certification, domain, other)"
+    )
+    source_detail: Optional[Union[ExperienceRequirement, EducationRequirement, CertificationRequirement]] = Field(
+        default=None,
+        description=(
+            "The original structured object this entry was derived from, when one exists "
+            "(experience/education/certification). Preserves numeric/target data (e.g. years, "
+            "target technology, degree_level) that the flat 'requirement' text alone loses. "
+            "None for skills, technologies, domain experience, and other_mandatory_requirements, "
+            "since those are plain strings in the source profile with no richer structure to keep."
+        )
     )
