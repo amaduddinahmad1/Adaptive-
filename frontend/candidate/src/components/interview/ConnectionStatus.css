@@ -4,5 +4,21 @@
   border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
   font-size: 0.75rem;
+}
+
+/* Clean disconnect: muted, not an error */
+.connection-status--disconnected .status-offline {
+  background-color: var(--text-muted);
+}
+
+/* Reconnecting: visible but not alarming */
+.connection-status--reconnecting .status-connecting {
+  background-color: var(--info-color);
+}
+
+.connection-status--failed .status-offline {
+  background-color: var(--error-color);
 }

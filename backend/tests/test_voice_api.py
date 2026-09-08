@@ -47,8 +47,17 @@ def test_voice_session_http_lifecycle(client: TestClient):
 
     start_response = client.post(f"/api/v1/voice/sessions/{session_id}/start")
     assert start_response.status_code == 200
-    assert start_response.json()["status"] == "started"
-    assert start_response.json()["session_id"] == session_id
+    start_body = start_response.json()
+    assert start_body["status"] == "started"
+    assert start_body["session_id"] == session_id
+    assert start_body["room_name"] == f"interview-{session_id}"
+    assert start_body["identity"] == "candidate-cand_1"
+    assert start_body["token"] == f"mock_token_interview-{session_id}_candidate-cand_1"
+    assert "livekit_url" in start_body
+
+    session_after_start = client.get(f"/api/v1/voice/sessions/{session_id}")
+    assert session_after_start.status_code == 200
+    assert "token" not in session_after_start.json()
 
     status_response = client.get(f"/api/v1/voice/sessions/{session_id}/status")
     assert status_response.status_code == 200
@@ -71,6 +80,38 @@ def test_voice_session_http_lifecycle(client: TestClient):
     completed_session = client.get(f"/api/v1/voice/sessions/{session_id}")
     assert completed_session.status_code == 200
     assert completed_session.json()["interview_status"] == InterviewStatus.COMPLETED
+
+
+JOIN_CONTRACT_FIELDS = {
+    "status",
+    "session_id",
+    "livekit_url",
+    "room_name",
+    "token",
+    "identity",
+}
+
+
+def test_start_returns_frontend_livekit_join_contract(client: TestClient):
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json={"candidate_id": "cand_1", "job_id": "job_1", "language": "en"},
+    ).json()
+    session_id = created["session_id"]
+
+    start_body = client.post(f"/api/v1/voice/sessions/{session_id}/start").json()
+
+    assert set(start_body.keys()) == JOIN_CONTRACT_FIELDS
+    assert start_body["status"] == "started"
+    assert start_body["session_id"] == session_id
+    assert start_body["room_name"] == f"interview-{session_id}"
+    assert start_body["identity"] == "candidate-cand_1"
+    assert start_body["token"] == f"mock_token_interview-{session_id}_candidate-cand_1"
+    assert isinstance(start_body["livekit_url"], str)
+
+    stored = client.get(f"/api/v1/voice/sessions/{session_id}").json()
+    assert "token" not in stored
+    assert stored["session_id"] == session_id
 
 
 def test_voice_session_not_found(client: TestClient):

@@ -1,7 +1,7 @@
 """
 Tests for schemas.
 """
-from app.schemas.voice_session import VoiceSessionSchema, InterviewStatus, ConnectionStatus
+from app.schemas.voice_session import VoiceSessionSchema, VoiceSessionStartResponse, InterviewStatus, ConnectionStatus
 from app.schemas.stt import STTConfig, STTResult
 from app.schemas.tts import TTSConfig, TTSResult
 
@@ -16,7 +16,29 @@ def test_voice_session_creation():
     assert session.interview_status == InterviewStatus.PENDING
     assert session.connection_status == ConnectionStatus.DISCONNECTED
     assert session.language == "en"
-    
+    assert "token" not in session.model_dump()
+
+
+def test_voice_session_start_response_join_contract():
+    payload = VoiceSessionStartResponse(
+        status="started",
+        session_id="sess-1",
+        livekit_url="wss://example.livekit.cloud",
+        room_name="interview-sess-1",
+        token="join-token",
+        identity="candidate-cand_1",
+    )
+    dumped = payload.model_dump()
+    assert dumped == {
+        "status": "started",
+        "session_id": "sess-1",
+        "livekit_url": "wss://example.livekit.cloud",
+        "room_name": "interview-sess-1",
+        "token": "join-token",
+        "identity": "candidate-cand_1",
+    }
+
+
 def test_stt_result_creation():
     result = STTResult(
         text="hello",

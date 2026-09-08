@@ -7,7 +7,7 @@ import ConnectionStatus from '../components/interview/ConnectionStatus';
 import InterviewControls from '../components/interview/InterviewControls';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import { useInterview } from '../hooks/useInterview';
-import { INTERVIEW_STATUS } from '../types/interview';
+import { CONNECTION_STATUS, INTERVIEW_STATUS } from '../types/interview';
 import './InterviewPage.css';
 
 const InterviewPage = ({ onComplete }) => {
@@ -36,7 +36,7 @@ const InterviewPage = ({ onComplete }) => {
     }
   }, [status, onComplete]);
 
-  if (status === INTERVIEW_STATUS.NOT_STARTED) {
+  if (status === INTERVIEW_STATUS.NOT_STARTED && connection !== CONNECTION_STATUS.FAILED) {
     return (
       <div className="loading-container">
         <LoadingSpinner size="lg" />
@@ -77,7 +77,7 @@ const InterviewPage = ({ onComplete }) => {
       
       <div className="interview-footer-area">
         <div className="status-container">
-          <ConnectionStatus status={connection} />
+          <ConnectionStatus status={connection} onRetry={actions.retryConnection} />
         </div>
         <InterviewControls onEnd={actions.endInterview} />
       </div>

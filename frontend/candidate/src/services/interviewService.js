@@ -1,44 +1,58 @@
-import { INTERVIEW_STATUS } from '../types/interview';
+const API_BASE = 'http://localhost:8000/api/v1';
 
-// Mock responses for the interview demo
-const MOCK_QUESTIONS = [
-  { id: 1, text: "Tell me about a time you had to lead a project under tight deadlines." },
-  { id: 2, text: "How do you handle disagreements with senior team members?" },
-  { id: 3, text: "Describe a complex technical problem you solved recently." }
-];
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
 
-export const createSession = async (candidateId) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ sessionId: 'mock-session-123', status: INTERVIEW_STATUS.NOT_STARTED });
-    }, 500);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(
+      `Voice API ${response.status}: ${detail || response.statusText}`,
+    );
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
+export const createSession = async (
+  candidateId,
+  jobId = 'demo-job',
+  language = 'en',
+) => {
+  return request('/voice/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      candidate_id: candidateId,
+      job_id: jobId,
+      language,
+    }),
   });
 };
 
-export const startInterview = async (sessionId) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ status: INTERVIEW_STATUS.IN_PROGRESS, firstQuestion: MOCK_QUESTIONS[0] });
-    }, 800);
+export const startInterview = async (sessionId, candidateId) => {
+  const query = candidateId
+    ? `?candidate=${encodeURIComponent(candidateId)}`
+    : '';
+  return request(`/voice/sessions/${encodeURIComponent(sessionId)}/start${query}`, {
+    method: 'POST',
   });
 };
 
 export const endInterview = async (sessionId) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ status: INTERVIEW_STATUS.COMPLETED });
-    }, 500);
+  return request(`/voice/sessions/${encodeURIComponent(sessionId)}/end`, {
+    method: 'POST',
   });
 };
 
 export const getSession = async (sessionId) => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        candidateName: "Alex Doe",
-        role: "Senior Frontend Engineer",
-        questions: MOCK_QUESTIONS
-      });
-    }, 300);
-  });
+  return request(`/voice/sessions/${encodeURIComponent(sessionId)}/status`);
 };

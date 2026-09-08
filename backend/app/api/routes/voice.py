@@ -1,11 +1,15 @@
 """
 Voice API routes.
 """
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
-from app.schemas.voice_session import VoiceSessionCreate, VoiceSessionSchema
+from app.schemas.voice_session import (
+    VoiceSessionCreate,
+    VoiceSessionSchema,
+    VoiceSessionStartResponse,
+)
 from app.services.voice.service import VoiceInterviewService
 
 router = APIRouter(prefix="/voice", tags=["voice"])
@@ -45,14 +49,15 @@ async def get_session(
     return session
 
 
-@router.post("/sessions/{session_id}/start")
+@router.post("/sessions/{session_id}/start", response_model=VoiceSessionStartResponse)
 async def start_interview(
     session_id: str,
+    candidate: Optional[str] = Query(default=None),
     service: VoiceInterviewService = Depends(get_voice_service),
 ) -> Any:
-    """Start the interview pipeline."""
+    """Start the interview pipeline and return the LiveKit join contract."""
     try:
-        return await service.start_interview(session_id)
+        return await service.start_interview(session_id, candidate_id=candidate)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

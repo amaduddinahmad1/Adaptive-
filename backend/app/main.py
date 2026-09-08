@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes.voice import router as voice_router
+from app.integrations.livekit.config import LiveKitConfig
+from app.integrations.livekit.service import LiveKitService
 from app.services.voice.service import VoiceInterviewService
 
 logging.basicConfig(
@@ -30,7 +32,15 @@ app.add_middleware(
 )
 
 # Application-scoped voice service so sessions persist across requests.
-app.state.voice_service = VoiceInterviewService()
+app.state.voice_service = VoiceInterviewService(
+    livekit_service=LiveKitService(
+        LiveKitConfig(
+            url=settings.livekit_url,
+            api_key=settings.livekit_api_key,
+            api_secret=settings.livekit_api_secret,
+        )
+    )
+)
 
 app.include_router(voice_router, prefix="/api/v1")
 

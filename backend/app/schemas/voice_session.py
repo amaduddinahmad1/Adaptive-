@@ -47,3 +47,14 @@ class VoiceSessionSchema(VoiceSessionBase):
 
     class Config:
         from_attributes = True
+
+
+class VoiceSessionStartResponse(BaseModel):
+    """Frontend LiveKit join contract returned by POST .../sessions/{id}/start."""
+
+    status: str
+    session_id: str
+    livekit_url: str
+    room_name: str
+    token: str
+    identity: str
