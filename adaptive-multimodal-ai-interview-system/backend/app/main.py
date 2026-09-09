@@ -1,17 +1,23 @@
 """
 Adaptive Multimodal AI Interview & Candidate Assessment System
 
-Minimal placeholder FastAPI application.
-Do NOT implement business logic here yet.
+Standalone FastAPI service exposing the JD + CV Intelligence & Eligibility
+Engine module (Days 1-5): JD parsing, CV parsing, experience matching, and
+eligibility checking. Runs independently of any other module in this repo.
 """
 
-# from fastapi import FastAPI
+from fastapi import FastAPI
 
-# app = FastAPI(
-#     title="Adaptive Multimodal AI Interview & Candidate Assessment System",
-#     version="0.1.0",
-# )
+from app.api.routes.pipeline import router as pipeline_router
 
-# @app.get("/")
-# async def root():
-#     return {"message": "API is running"}
+app = FastAPI(
+    title="Adaptive Multimodal AI Interview & Candidate Assessment System",
+    version="0.1.0",
+)
+
+app.include_router(pipeline_router)
+
+
+@app.get("/")
+async def root():
+    return {"message": "API is running"}
