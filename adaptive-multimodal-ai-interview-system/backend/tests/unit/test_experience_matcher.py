@@ -271,3 +271,29 @@ def test_technology_lookup_is_case_and_whitespace_insensitive():
 
     assert result.candidate_years == 2.5
     assert result.met is True
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Zero General Experience When Candidate Has No Work History
+# ---------------------------------------------------------------------------
+def test_general_experience_zero_when_no_work_history():
+    """
+    JD requires 2 years general experience; candidate has no work_experience
+    at all -> NOT MET, no crash. calculate_total_general_experience([]) == 0.0
+    is already tested in isolation (test_date_utils.py), but this confirms
+    the wiring through match_experience produces a correct NOT MET result,
+    not just the right number in isolation.
+    """
+    candidate = CandidateProfile(work_experience=[])
+    requirement = ExperienceRequirement(
+        description="2 years general experience",
+        years=2.0,
+        requirement_type=ExperienceRequirementType.GENERAL,
+        target=None,
+        is_mandatory=True,
+    )
+
+    result = match_experience(requirement, candidate, today=TODAY)
+
+    assert result.candidate_years == 0.0
+    assert result.met is False
