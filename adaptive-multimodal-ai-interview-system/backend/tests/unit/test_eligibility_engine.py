@@ -21,6 +21,7 @@ from app.schemas.job import (
     ExperienceRequirement,
     ExperienceRequirementType,
     JobRequirementProfile,
+    RequirementType,
 )
 from app.services.eligibility.eligibility_engine import (
     ApplicationDetails,
@@ -301,3 +302,107 @@ def test_format_eligibility_report_matches_exact_target_format():
         "Eligibility: ELIGIBLE"
     )
     assert report == expected
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Missing Mandatory Skill Blocks Eligibility
+# ---------------------------------------------------------------------------
+def test_missing_mandatory_skill_blocks_eligibility():
+    """
+    A missing mandatory SKILL (not TECHNOLOGY) sets overall_eligible False.
+    Day 7 audit found that required_skills/preferred_skills were never
+    exercised anywhere in this suite — only required_technologies/
+    preferred_technologies — despite going through the same matching code.
+    """
+    jd = _baseline_jd().model_copy(update={"required_skills": ["System Design"]})
+
+    result = _run(jd, _baseline_candidate(), _baseline_application(), _baseline_constraints())
+
+    skill_result = next(r for r in result.requirement_results if r.requirement.requirement == "System Design")
+    assert skill_result.requirement.requirement_type == RequirementType.SKILL
+    assert skill_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.overall_eligible is False
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Missing Preferred Skill Does Not Block Eligibility
+# ---------------------------------------------------------------------------
+def test_missing_preferred_skill_does_not_block_eligibility():
+    """A missing preferred SKILL (not TECHNOLOGY) is flagged but never blocks eligibility."""
+    jd = _baseline_jd().model_copy(update={"preferred_skills": ["System Design"]})
+
+    result = _run(jd, _baseline_candidate(), _baseline_application(), _baseline_constraints())
+
+    skill_result = next(r for r in result.requirement_results if r.requirement.requirement == "System Design")
+    assert skill_result.requirement.requirement_type == RequirementType.SKILL
+    assert skill_result.status == MatchStatus.NOT_FOUND_PREFERRED
+    assert result.overall_eligible is True
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Joining Availability Exceeding the Limit Blocks Eligibility
+# ---------------------------------------------------------------------------
+def test_joining_availability_exceeds_limit_blocks_eligibility():
+    """
+    A joining_availability that parses successfully but exceeds
+    max_notice_period_days blocks eligibility — the actual NOT_MET_MANDATORY
+    path, distinct from the existing MET and unparseable-fails-safe tests,
+    neither of which exercised this branch.
+    """
+    application = ApplicationDetails(joining_availability="60 days", salary_expectation=100000.0)
+
+    result = _run(_baseline_jd(), _baseline_candidate(), application, _baseline_constraints())
+
+    assert result.joining_availability_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.overall_eligible is False
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Salary Below Minimum Blocks Eligibility
+# ---------------------------------------------------------------------------
+def test_salary_below_minimum_blocks_eligibility():
+    """
+    Candidate's salary_expectation below RecruiterConstraints.salary_min
+    blocks eligibility — the violates_min branch of _check_salary, untested
+    until now (only the violates_max direction was covered).
+    """
+    application = ApplicationDetails(joining_availability="2 weeks", salary_expectation=50000.0)
+
+    result = _run(_baseline_jd(), _baseline_candidate(), application, _baseline_constraints())
+
+    assert result.salary_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.overall_eligible is False
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Multiple Simultaneous Mandatory Failures Are All Surfaced
+# ---------------------------------------------------------------------------
+def test_multiple_simultaneous_mandatory_failures_all_surfaced():
+    """
+    Three simultaneous, independent mandatory failures of different kinds
+    (missing technology, salary over range, specific-experience shortfall)
+    must ALL appear correctly in the result set — not just overall_eligible
+    being False. Guards against an early-return bug that could silently
+    drop a failure once another has already been found.
+    """
+    candidate = _baseline_candidate().model_copy(
+        update={
+            "technologies": ["FastAPI"],  # PostgreSQL (mandatory) now missing
+            "technology_specific_experience": [
+                TechnologyExperience(technology="Python", years=1.0)  # below the required 2.0
+            ],
+        }
+    )
+    application = ApplicationDetails(joining_availability="2 weeks", salary_expectation=150000.0)  # exceeds salary_max
+
+    result = _run(_baseline_jd(), candidate, application, _baseline_constraints())
+
+    postgres_result = next(r for r in result.requirement_results if r.requirement.requirement == "PostgreSQL")
+    python_result = next(r for r in result.experience_results if r.match.target == "Python")
+    general_result = next(r for r in result.experience_results if r.match.target is None)
+
+    assert postgres_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert python_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.salary_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert general_result.status == MatchStatus.MET  # unrelated requirement, unaffected
+    assert result.overall_eligible is False
