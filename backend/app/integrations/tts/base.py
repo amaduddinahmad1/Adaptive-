@@ -4,6 +4,11 @@ Abstract base class for TTS Providers.
 from abc import ABC, abstractmethod
 from app.schemas.tts import TTSConfig, TTSResult
 
+
+class TTSProviderError(Exception):
+    """Catchable failure from a TTS provider (auth, quota, rate limit, network, etc.)."""
+
+
 class TTSProvider(ABC):
     @abstractmethod
     async def synthesize(self, text: str, config: TTSConfig) -> TTSResult:

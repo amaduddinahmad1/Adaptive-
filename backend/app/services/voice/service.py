@@ -9,7 +9,6 @@ from app.core.config import settings
 from app.integrations.livekit.config import LiveKitConfig
 from app.integrations.livekit.service import LiveKitService
 from app.integrations.stt.factory import STTProviderFactory
-from app.integrations.tts.factory import TTSProviderFactory
 from app.integrations.pipecat.pipeline import InterviewPipeline
 from app.integrations.pipecat.interview_bridge import MockInterviewBridge
 from .session_manager import SessionManager
@@ -50,12 +49,15 @@ class VoiceInterviewService:
         if not session:
             raise ValueError("Session not found")
 
-        # Initialize providers (default to mock for now)
-        stt_provider = STTProviderFactory.get_provider("mock")
-        tts_provider = TTSProviderFactory.get_provider("mock")
+        stt_provider = STTProviderFactory.get_provider()
 
         pipeline = InterviewPipeline()
-        await pipeline.start(session_id, stt_provider, tts_provider)
+        await pipeline.start(
+            session_id,
+            stt_provider=stt_provider,
+            bridge=self.bridge,
+            language=session.language,
+        )
         self.pipelines[session_id] = pipeline
 
         room_name = f"interview-{session_id}"
