@@ -1,12 +1,22 @@
 import React from 'react';
-import './StatusIndicator.css';
 
-const StatusIndicator = ({ status, label, pulsing = false }) => {
-  // status: 'online', 'offline', 'connecting'
+const isActive = (status) => status === 'online' || status === 'connected';
+
+const StatusIndicator = ({ status, label }) => {
+  const active = isActive(status);
+
   return (
-    <div className="status-indicator">
-      <span className={`status-dot status-${status} ${pulsing ? 'pulsing' : ''}`}></span>
-      {label && <span className="status-label">{label}</span>}
+    <div className="inline-flex items-center gap-2 font-sans">
+      <span
+        className={`size-2 rounded-full ${
+          active
+            ? 'bg-info'
+            : status === 'connecting'
+              ? 'bg-info/50'
+              : 'bg-text-muted'
+        }`}
+      />
+      {label && <span className="text-xs text-text-muted">{label}</span>}
     </div>
   );
 };

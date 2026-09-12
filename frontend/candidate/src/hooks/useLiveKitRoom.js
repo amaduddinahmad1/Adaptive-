@@ -47,7 +47,14 @@ export const useLiveKitRoom = () => {
       el.play().catch(() => {});
     });
 
+    const handleVisibility = () => {
+      session.setMicrophoneEnabled(!document.hidden).catch(() => {});
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       session.onConnectionStateChange(null);
       session.onRemoteAudioTrack(null);
       session.onDisconnected(null);

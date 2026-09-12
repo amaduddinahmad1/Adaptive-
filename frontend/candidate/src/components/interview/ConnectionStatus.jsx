@@ -2,7 +2,6 @@ import React from 'react';
 import StatusIndicator from '../common/StatusIndicator';
 import Button from '../common/Button';
 import { CONNECTION_STATUS } from '../../types/interview';
-import './ConnectionStatus.css';
 
 const STATUS_PROPS = {
   [CONNECTION_STATUS.CONNECTED]: { status: 'online', label: 'Connected', pulsing: false },
@@ -19,10 +18,9 @@ const ConnectionStatus = ({ status, onRetry }) => {
     pulsing: false,
   };
   const showRetry = status === CONNECTION_STATUS.FAILED && typeof onRetry === 'function';
-  const stateClass = String(status || 'offline').toLowerCase();
 
   return (
-    <div className={`connection-status connection-status--${stateClass}`}>
+    <div className="inline-flex items-center gap-2">
       <StatusIndicator {...indicator} />
       {showRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>

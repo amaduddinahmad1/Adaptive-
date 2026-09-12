@@ -47,9 +47,10 @@ export const startInterview = async (sessionId, candidateId) => {
   });
 };
 
-export const endInterview = async (sessionId) => {
+export const endInterview = async (sessionId, extra) => {
   return request(`/voice/sessions/${encodeURIComponent(sessionId)}/end`, {
     method: 'POST',
+    ...(extra ? { body: JSON.stringify(extra) } : {}),
   });
 };
 

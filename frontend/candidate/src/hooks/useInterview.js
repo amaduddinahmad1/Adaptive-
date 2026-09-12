@@ -159,11 +159,15 @@ export const useInterview = () => {
     }
   }, [connect]);
 
-  const handleEnd = async () => {
+  const handleEnd = useCallback(async (extra) => {
     clearInterval(timerRef.current);
+    const payload =
+      extra && typeof extra === 'object' && !('nativeEvent' in extra)
+        ? extra
+        : undefined;
     try {
       if (sessionIdRef.current) {
-        await service.endInterview(sessionIdRef.current);
+        await service.endInterview(sessionIdRef.current, payload);
       }
     } catch (err) {
       console.error('Failed to end interview', err);
@@ -172,7 +176,7 @@ export const useInterview = () => {
       localStorage.removeItem(SHARED_SESSION_KEY);
       setStatus(INTERVIEW_STATUS.COMPLETED);
     }
-  };
+  }, [disconnect]);
 
   const toggleMic = () => {
     if (micState === MIC_STATE.INACTIVE) {
@@ -193,6 +197,9 @@ export const useInterview = () => {
         } else {
           setTimeout(() => {
             addTranscript('AI', "Thank you, that concludes our questions.");
+            setTimeout(() => {
+              handleEnd();
+            }, 3000);
           }, 1500);
         }
       }, 2000);

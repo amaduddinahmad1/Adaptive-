@@ -30,6 +30,11 @@ export class LiveKitSession {
     await this.room.localParticipant.setMicrophoneEnabled(true);
   }
 
+  async setMicrophoneEnabled(enabled) {
+    if (this.room.state !== 'connected') return;
+    await this.room.localParticipant.setMicrophoneEnabled(enabled);
+  }
+
   async disconnect() {
     const participant = this.room.localParticipant;
     const tracks = [...participant.trackPublications.values()]

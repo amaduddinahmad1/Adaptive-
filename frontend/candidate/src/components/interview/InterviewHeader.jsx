@@ -1,20 +1,25 @@
 import React from 'react';
-import Badge from '../common/Badge';
 import Timer from '../common/Timer';
 import { INTERVIEW_STATUS } from '../../types/interview';
-import './InterviewHeader.css';
 
 const InterviewHeader = ({ candidateName, role, status, elapsedTime }) => {
   return (
-    <header className="interview-header">
-      <div className="header-left">
-        <h2 className="candidate-name">{candidateName || 'Candidate'}</h2>
-        <Badge variant="info">{role || 'Role'}</Badge>
+    <header className="flex shrink-0 items-center justify-between px-8 py-5 sm:px-12 lg:px-16 xl:px-24">
+      <div className="flex min-w-0 items-baseline gap-3">
+        <p className="truncate font-sans text-sm font-medium text-text">
+          {candidateName || 'Candidate'}
+        </p>
+        <p className="truncate font-sans text-sm text-text-muted">
+          {role || 'Role'}
+        </p>
       </div>
-      
-      <div className="header-right">
+
+      <div className="flex shrink-0 items-center gap-5">
         {status === INTERVIEW_STATUS.IN_PROGRESS && (
-          <Badge variant="success" dot={true}>Live</Badge>
+          <span className="inline-flex items-center gap-2 font-sans text-xs text-text-muted">
+            <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
+            Live
+          </span>
         )}
         <Timer seconds={elapsedTime} />
       </div>

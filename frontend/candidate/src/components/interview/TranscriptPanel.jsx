@@ -1,7 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import Card from '../common/Card';
-import EmptyState from '../common/EmptyState';
-import './TranscriptPanel.css';
 
 const TranscriptPanel = ({ transcript }) => {
   const scrollRef = useRef(null);
@@ -13,25 +10,40 @@ const TranscriptPanel = ({ transcript }) => {
   }, [transcript]);
 
   return (
-    <Card className="transcript-panel" padded={false}>
-      <div className="transcript-header">
-        <h4>Live Transcript</h4>
-      </div>
-      <div className="transcript-body" ref={scrollRef}>
+    <div className="flex h-full min-h-0 flex-col px-5 py-5 lg:px-6 lg:py-8">
+      <p className="mb-4 font-sans text-[11px] font-medium uppercase tracking-[0.14em] text-text-muted">
+        Transcript
+      </p>
+      <div className="min-h-0 flex-1 overflow-y-auto" ref={scrollRef}>
         {transcript.length === 0 ? (
-          <EmptyState icon="💬" title="No messages yet" description="The conversation transcript will appear here." />
+          <p className="font-sans text-xs leading-relaxed text-text-muted">
+            The conversation will appear here.
+          </p>
         ) : (
-          <div className="message-list">
+          <div className="flex flex-col gap-4">
             {transcript.map(msg => (
-              <div key={msg.id} className={`message ${msg.sender === 'AI' ? 'message-ai' : 'message-candidate'}`}>
-                <div className="message-sender">{msg.sender}</div>
-                <div className="message-bubble">{msg.text}</div>
+              <div
+                key={msg.id}
+                className={`flex max-w-[92%] flex-col ${
+                  msg.sender === 'AI' ? 'self-start' : 'self-end'
+                }`}
+              >
+                <div
+                  className={`mb-1 font-sans text-[10px] uppercase tracking-wide text-text-muted ${
+                    msg.sender === 'AI' ? '' : 'text-right'
+                  }`}
+                >
+                  {msg.sender}
+                </div>
+                <div className="font-sans text-xs leading-relaxed text-text-muted">
+                  {msg.text}
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
-    </Card>
+    </div>
   );
 };
 

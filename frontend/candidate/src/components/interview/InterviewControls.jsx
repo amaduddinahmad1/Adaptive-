@@ -1,11 +1,10 @@
 import React from 'react';
 import Button from '../common/Button';
-import './InterviewControls.css';
 
 const InterviewControls = ({ onEnd }) => {
   return (
-    <div className="interview-controls">
-      <Button variant="danger" size="md" onClick={onEnd}>
+    <div className="flex items-center">
+      <Button variant="danger" size="sm" onClick={onEnd}>
         End Interview
       </Button>
     </div>

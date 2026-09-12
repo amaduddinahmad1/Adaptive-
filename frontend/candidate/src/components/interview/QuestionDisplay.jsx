@@ -1,19 +1,17 @@
 import React from 'react';
-import Card from '../common/Card';
-import './QuestionDisplay.css';
 
 const QuestionDisplay = ({ question, number, total }) => {
   if (!question) return null;
 
   return (
-    <Card className="question-display" padded={false}>
-      <div className="question-header">
-        <span className="question-number">Question {number} of {total}</span>
-      </div>
-      <div className="question-body">
-        <h3 className="question-text">{question.text}</h3>
-      </div>
-    </Card>
+    <div className="animate-question-in w-full max-w-3xl">
+      <p className="mb-5 font-sans text-xs font-medium uppercase tracking-[0.14em] text-text-muted">
+        Question {number} of {total}
+      </p>
+      <p className="font-display text-3xl font-medium leading-snug tracking-tight text-text md:text-4xl">
+        {question.text}
+      </p>
+    </div>
   );
 };
 
