@@ -1,5 +1,5 @@
 """
-Local OpenAI Whisper STT provider (CPU-only).
+Local faster-whisper STT provider (CPU-only, int8).
 
 Defaults to English (`language="en"`); pass STTConfig.language to override.
 Model size defaults to "small" via WHISPER_MODEL_SIZE for laptop CPU use.
@@ -44,16 +44,16 @@ class WhisperLocalSTTProvider(STTProvider):
 
     def _load_model(self) -> Any:
         try:
-            import whisper
+            from faster_whisper import WhisperModel
         except ImportError as exc:
             raise WhisperModelLoadError(
-                "Failed to load Whisper: the openai-whisper package is not installed. "
+                "Failed to load Whisper: the faster-whisper package is not installed. "
                 "Install backend requirements (pip install -r requirements.txt) before "
                 "using the whisper_local STT provider."
             ) from exc
 
         try:
-            return whisper.load_model(self._model_size, device="cpu")
+            return WhisperModel(self._model_size, device="cpu", compute_type="int8")
         except Exception as exc:
             raise WhisperModelLoadError(
                 f"Failed to load Whisper model '{self._model_size}' on CPU. "
@@ -86,12 +86,14 @@ class WhisperLocalSTTProvider(STTProvider):
 
         audio_input, temp_path = self._prepare_audio(audio_data, config)
         try:
-            result = self._ensure_model().transcribe(
+            segments_iter, info = self._ensure_model().transcribe(
                 audio_input,
                 language=language,
                 task="transcribe",
-                fp16=False,
+                beam_size=1,
+                vad_filter=True,
             )
+            segments = list(segments_iter)
         finally:
             if temp_path:
                 try:
@@ -99,10 +101,10 @@ class WhisperLocalSTTProvider(STTProvider):
                 except OSError:
                     pass
 
-        text = (result.get("text") or "").strip()
+        text = " ".join(part for part in (seg.text.strip() for seg in segments) if part)
         metadata = {
-            "language": result.get("language"),
-            "segments": result.get("segments"),
+            "language": info.language,
+            "segments": segments,
         }
         return text, metadata
 
@@ -177,5 +179,8 @@ def _confidence_from_metadata(metadata: Optional[dict[str, Any]]) -> float:
     segments = metadata.get("segments") or []
     if not segments:
         return 0.0
-    scores = [max(0.0, min(1.0, 1.0 - float(seg.get("no_speech_prob", 0.0)))) for seg in segments]
+    scores = [
+        max(0.0, min(1.0, 1.0 - float(getattr(seg, "no_speech_prob", 0.0))))
+        for seg in segments
+    ]
     return sum(scores) / len(scores)

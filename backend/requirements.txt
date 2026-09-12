@@ -12,8 +12,12 @@ httpx>=0.27.0,<1.0.0
 # LiveKit server SDK (room/token). Pipecat and Gemini remain Day 2+ later.
 livekit-api>=1.0.0,<2.0.0
 
-# Local STT (CPU Whisper). Requires ffmpeg on PATH for compressed audio files.
-openai-whisper>=20240930
+# LiveKit Agents worker (real-time voice). Silero VAD is local/free — no LiveKit Cloud.
+livekit-agents
+livekit-plugins-silero
+
+# Local STT (CPU faster-whisper, int8). Requires ffmpeg on PATH for compressed audio files.
+faster-whisper
 
 # ElevenLabs TTS (eleven_multilingual_v2 for Urdu)
 elevenlabs>=1.50.0,<3.0.0

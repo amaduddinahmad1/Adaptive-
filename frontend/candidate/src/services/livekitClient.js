@@ -5,6 +5,11 @@ export class LiveKitSession {
     this.room = new Room({
       adaptiveStream: true,
       dynacast: true,
+      audioCaptureDefaults: {
+        noiseSuppression: true,
+        echoCancellation: true,
+        autoGainControl: true,
+      },
     });
 
     this._onRemoteAudioTrack = null;
