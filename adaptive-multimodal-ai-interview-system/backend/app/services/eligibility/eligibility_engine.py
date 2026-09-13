@@ -33,7 +33,7 @@ surfacing the item for a human to check (see format_eligibility_report).
 import re
 from datetime import date
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
@@ -159,9 +159,63 @@ def _case_insensitive_substring_match(needle: str, haystacks: List[str]) -> bool
     return any(normalized_needle in item.strip().lower() for item in haystacks)
 
 
+# Curated degree-abbreviation equivalents. "Bachelor's"/"Master's" deliberately
+# appear in more than one group since a JD's generic degree_level should be
+# satisfiable by any of that degree's specific forms (e.g. either B.S. or
+# B.A. satisfies a plain "Bachelor's" requirement). Certification matching has
+# no equivalent table yet — no concrete abbreviation mismatch has been
+# observed there (see LIMITATIONS.md).
+_DEGREE_EQUIVALENCE_GROUPS: List[Set[str]] = [
+    {"bachelor's", "bachelors", "b.s.", "bs", "bachelor of science"},
+    {"bachelor's", "bachelors", "b.a.", "ba", "bachelor of arts"},
+    {"master's", "masters", "m.s.", "ms", "master of science"},
+    {"phd", "ph.d.", "doctorate", "doctoral"},
+]
+
+
+def _degree_aliases(term: str) -> Set[str]:
+    """
+    Every phrasing interchangeable with `term`, per _DEGREE_EQUIVALENCE_GROUPS,
+    plus the term itself. A term absent from the table maps to just itself, so
+    unlisted degree levels fall back to plain substring matching unchanged.
+    """
+    normalized = term.strip().lower()
+    aliases = {normalized}
+    for group in _DEGREE_EQUIVALENCE_GROUPS:
+        if normalized in group:
+            aliases |= group
+    return aliases
+
+
+def _education_match(degree_level: str, education_entries: List[str]) -> bool:
+    """
+    Substring match after case/whitespace normalization, expanded across
+    curated degree-abbreviation equivalents (e.g. "Bachelor's" <-> "B.S.") so
+    real abbreviation mismatches between independent JD/CV LLM phrasing don't
+    produce false NOT_MET verdicts. See LIMITATIONS.md.
+    """
+    return any(_case_insensitive_substring_match(alias, education_entries) for alias in _degree_aliases(degree_level))
+
+
 def _match_classified_requirement(requirement: ClassifiedRequirement, candidate: CandidateProfile) -> MatchStatus:
     """
     Matches a single non-experience ClassifiedRequirement against a candidate.
+
+    SKILL and TECHNOLOGY requirements are both checked against the combined
+    set of candidate.skills + candidate.technologies, not just the matching
+    field. JD parsing and CV parsing are two independent LLM extractions
+    with no shared vocabulary enforcement between them, so they don't
+    reliably agree on which field a given term belongs in — e.g. "Python"
+    filed as a skill by one and a technology by the other. Confirmed
+    happening on real (non-test) data during the first full pipeline E2E
+    run; see LIMITATIONS.md. This mirrors the same real-vocabulary-mismatch
+    reasoning as experience_matcher._lookup_technology_years.
+
+    EDUCATION requirements match the degree_level through _education_match,
+    which additionally covers curated degree-abbreviation equivalents (e.g.
+    "Bachelor's" <-> "B.S.") on top of plain substring matching — see
+    LIMITATIONS.md. CERTIFICATION has no such table yet: no concrete
+    abbreviation mismatch has been observed there.
 
     DOMAIN and OTHER always return MANUAL_REVIEW_REQUIRED: CandidateProfile
     has no field representing industry/domain background or things like work
@@ -172,15 +226,13 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     NameError (or, if refactored, a Pydantic validation error on a None
     status) surfaces immediately rather than silently misclassifying.
     """
-    if requirement.requirement_type == RequirementType.SKILL:
-        found = _case_insensitive_exact_match(requirement.requirement, candidate.skills)
-    elif requirement.requirement_type == RequirementType.TECHNOLOGY:
-        found = _case_insensitive_exact_match(requirement.requirement, candidate.technologies)
+    if requirement.requirement_type in (RequirementType.SKILL, RequirementType.TECHNOLOGY):
+        found = _case_insensitive_exact_match(requirement.requirement, candidate.skills + candidate.technologies)
     elif requirement.requirement_type == RequirementType.CERTIFICATION:
         found = _case_insensitive_substring_match(requirement.requirement, candidate.certifications)
     elif requirement.requirement_type == RequirementType.EDUCATION:
         degree_level = requirement.source_detail.degree_level if requirement.source_detail else requirement.requirement
-        found = _case_insensitive_substring_match(degree_level, candidate.education)
+        found = _education_match(degree_level, candidate.education)
     elif requirement.requirement_type in (RequirementType.DOMAIN, RequirementType.OTHER):
         return MatchStatus.MANUAL_REVIEW_REQUIRED
 

@@ -340,6 +340,136 @@ def test_missing_preferred_skill_does_not_block_eligibility():
 
 
 # ---------------------------------------------------------------------------
+# Test 11b: Cross-Field Skill/Technology Match (JD Skill, CV Technology)
+# ---------------------------------------------------------------------------
+def test_required_skill_matches_candidate_technology_cross_field():
+    """
+    Regression test for the E2E-observed Python mismatch (see LIMITATIONS.md):
+    the JD parser and CV parser are independent LLM extractions that don't
+    reliably agree on which field a term belongs in. A JD requiring "Python"
+    as a SKILL must MET against a candidate who has "Python" only under
+    technologies, not skills.
+    """
+    jd = _baseline_jd().model_copy(update={"required_skills": ["Python"]})
+    candidate = _baseline_candidate().model_copy(update={"skills": [], "technologies": ["FastAPI", "PostgreSQL", "Python"]})
+
+    result = _run(jd, candidate, _baseline_application(), _baseline_constraints())
+
+    python_skill_result = next(
+        r for r in result.requirement_results
+        if r.requirement.requirement == "Python" and r.requirement.requirement_type == RequirementType.SKILL
+    )
+    assert python_skill_result.status == MatchStatus.MET
+
+
+# ---------------------------------------------------------------------------
+# Test 11c: Cross-Field Match Is Also Case/Whitespace-Normalized
+# ---------------------------------------------------------------------------
+def test_required_technology_matches_candidate_skill_cross_field_normalized():
+    """
+    Mirror case of Test 11b (TECHNOLOGY requirement found under
+    candidate.skills instead of candidate.technologies), combined with the
+    existing case/whitespace normalization to confirm the combined-field
+    lookup doesn't bypass it.
+    """
+    jd = _baseline_jd().model_copy(update={"required_technologies": ["FastAPI", "PostgreSQL", "Redis"]})
+    candidate = _baseline_candidate().model_copy(update={"skills": ["  REDIS  "], "technologies": ["FastAPI", "PostgreSQL"]})
+
+    result = _run(jd, candidate, _baseline_application(), _baseline_constraints())
+
+    redis_result = next(r for r in result.requirement_results if r.requirement.requirement == "Redis")
+    assert redis_result.requirement.requirement_type == RequirementType.TECHNOLOGY
+    assert redis_result.status == MatchStatus.MET
+
+
+# ---------------------------------------------------------------------------
+# Test 11d: Degree Abbreviation Match — JD "Bachelor's" vs CV "B.S."
+# ---------------------------------------------------------------------------
+def test_education_bachelors_requirement_matches_bs_cv_entry():
+    """
+    Regression test for the E2E-observed Bachelor's/B.S. mismatch (see
+    LIMITATIONS.md): a JD requiring "Bachelor's" must MET against a CV
+    education entry phrased as "B.S." via the curated degree-abbreviation
+    table, not just plain substring matching.
+    """
+    jd = _baseline_jd().model_copy(
+        update={"education_requirements": [EducationRequirement(degree_level="Bachelor's", is_mandatory=True)]}
+    )
+    candidate = _baseline_candidate().model_copy(
+        update={"education": ["B.S. in Computer Science, State University, 2020"]}
+    )
+
+    result = _run(jd, candidate, _baseline_application(), _baseline_constraints())
+
+    education_result = next(r for r in result.requirement_results if r.requirement.requirement_type == RequirementType.EDUCATION)
+    assert education_result.status == MatchStatus.MET
+
+
+# ---------------------------------------------------------------------------
+# Test 11e: Degree Abbreviation Match Is Bidirectional — JD "B.S." vs CV "Bachelor's"/"Bachelor of Science"
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("cv_education_entry", ["Bachelor's in Computer Science, State University", "Bachelor of Science in Computer Science, State University"])
+def test_education_bs_requirement_matches_bachelors_cv_entry(cv_education_entry):
+    """The reverse direction of Test 11d: JD phrased as the abbreviation, CV phrased in full."""
+    jd = _baseline_jd().model_copy(
+        update={"education_requirements": [EducationRequirement(degree_level="B.S.", is_mandatory=True)]}
+    )
+    candidate = _baseline_candidate().model_copy(update={"education": [cv_education_entry]})
+
+    result = _run(jd, candidate, _baseline_application(), _baseline_constraints())
+
+    education_result = next(r for r in result.requirement_results if r.requirement.requirement_type == RequirementType.EDUCATION)
+    assert education_result.status == MatchStatus.MET
+
+
+# ---------------------------------------------------------------------------
+# Test 11f: Degree Term Absent From the Table Falls Back to Plain Substring Matching
+# ---------------------------------------------------------------------------
+def test_education_unlisted_degree_term_falls_back_to_substring_match():
+    """
+    A degree_level not present in _DEGREE_EQUIVALENCE_GROUPS (e.g. "MBA")
+    must behave exactly as before: plain substring matching, unaffected by
+    the new abbreviation table.
+    """
+    jd = _baseline_jd().model_copy(
+        update={"education_requirements": [EducationRequirement(degree_level="MBA", is_mandatory=True)]}
+    )
+    candidate_match = _baseline_candidate().model_copy(update={"education": ["MBA, State University, 2020"]})
+    candidate_no_match = _baseline_candidate().model_copy(update={"education": ["B.S. in Computer Science, State University, 2020"]})
+
+    matched = _run(jd, candidate_match, _baseline_application(), _baseline_constraints())
+    unmatched = _run(jd, candidate_no_match, _baseline_application(), _baseline_constraints())
+
+    matched_result = next(r for r in matched.requirement_results if r.requirement.requirement_type == RequirementType.EDUCATION)
+    unmatched_result = next(r for r in unmatched.requirement_results if r.requirement.requirement_type == RequirementType.EDUCATION)
+    assert matched_result.status == MatchStatus.MET
+    assert unmatched_result.status == MatchStatus.NOT_MET_MANDATORY
+
+
+# ---------------------------------------------------------------------------
+# Test 11g: A Genuinely Different Degree Level Still Correctly Fails
+# ---------------------------------------------------------------------------
+def test_education_genuinely_different_degree_still_fails():
+    """
+    The abbreviation table must not paper over an actual mismatch: a JD
+    requiring a Master's degree against a candidate who only has a
+    Bachelor's must still be NOT_MET_MANDATORY.
+    """
+    jd = _baseline_jd().model_copy(
+        update={"education_requirements": [EducationRequirement(degree_level="Master's", is_mandatory=True)]}
+    )
+    candidate = _baseline_candidate().model_copy(
+        update={"education": ["B.S. in Computer Science, State University, 2020"]}
+    )
+
+    result = _run(jd, candidate, _baseline_application(), _baseline_constraints())
+
+    education_result = next(r for r in result.requirement_results if r.requirement.requirement_type == RequirementType.EDUCATION)
+    assert education_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.overall_eligible is False
+
+
+# ---------------------------------------------------------------------------
 # Test 12: Joining Availability Exceeding the Limit Blocks Eligibility
 # ---------------------------------------------------------------------------
 def test_joining_availability_exceeds_limit_blocks_eligibility():
