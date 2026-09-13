@@ -55,3 +55,9 @@ logs/
 # Misc
 *.bak
 *.tmp
+
+# Personal candidate files for run_real_interview.py -- never commit real
+# CVs or interview transcripts to a shared repo
+backend/scripts/*.pdf
+backend/scripts/*.docx
+backend/scripts/my_interview_transcript.txt
