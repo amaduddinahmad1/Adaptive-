@@ -8,12 +8,18 @@ uvicorn>=0.30.0
 # Data Validation & Schemas
 pydantic>=2.7.0,<3.0.0
 pydantic-settings>=2.2.0,<3.0.0
+email-validator>=2.0
 
 # LLM Providers
 google-genai>=1.0.0
 
 # Environment & Utilities
 python-dotenv>=1.0.0
+
+# Database (PostgreSQL + ORM + migrations)
+SQLAlchemy>=2.0,<3.0
+psycopg[binary]>=3.1,<4.0
+alembic>=1.13,<2.0
 
 # CV Text Extraction
 pdfplumber>=0.11.0
