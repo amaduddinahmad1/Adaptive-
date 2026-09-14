@@ -20,11 +20,13 @@ import array
 import asyncio
 import io
 import logging
+import os
 import time
 import wave
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any
 
+import httpx
 from livekit import rtc
 from livekit.agents import (
     DEFAULT_API_CONNECT_OPTIONS,
@@ -51,6 +53,36 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LANGUAGE = "en"
 _ROOM_SESSION_PREFIX = "interview-"
+_GREETING = "Hello, thanks for joining. Let's get started."
+_NO_SPEECH_TIMEOUT_SECONDS = 12
+_MAX_CONSECUTIVE_SILENCE_PROMPTS = 2
+_NO_SPEECH_PROMPT = "Are you still there? Take your time whenever you're ready to answer."
+_FINAL_SILENCE_MESSAGE = (
+    "It looks like we're having trouble hearing you. I'll go ahead and end this session now."
+)
+_EMPTY_TRANSCRIPT_PROMPT = "Sorry, I didn't catch that — could you repeat your answer?"
+_END_INTENT_CLOSING_MESSAGE = (
+    "Understood — thank you for your time today. I'll end the interview now."
+)
+_END_INTENT_PHRASES = [
+    "don't want to continue",
+    "do not want to continue",
+    "want to stop the interview",
+    "end the interview",
+    "stop the interview",
+    "i need to leave now",
+    "i have to go now",
+    "i want to end this interview",
+    "i'd like to end the interview",
+    "i need to end this call",
+    "i'm done with this interview",
+]
+_BACKEND_BASE_URL = os.getenv("BACKEND_API_BASE_URL", "http://localhost:8000/api/v1").rstrip("/")
+
+
+def _matches_end_intent(text: str) -> bool:
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in _END_INTENT_PHRASES)
 
 
 class _PipelinePlaceholderSTT(stt.STT):
@@ -147,6 +179,32 @@ class InterviewAgent(Agent):
         )
         self._whisper = WhisperLocalSTTProvider()
         self._bridge = MockInterviewBridge()
+        self._greeting_sent = False
+
+    async def on_enter(self) -> None:
+        """Speak a greeting and the first question when the agent joins the room.
+
+        livekit-agents 1.8.1 calls this once from AgentActivity.start (not on
+        resume). Built-in workflows use session.generate_reply() so the LLM can
+        produce that first utterance. We already have the first-question text
+        from MockInterviewBridge, so we use the canned-text equivalent noted on
+        Agent.on_user_turn_exceeded: session.say(). That still synthesizes through
+        tts_node (AgentActivity.say -> _tts_task -> perform_tts_inference).
+        """
+        if self._greeting_sent:
+            return
+        self._greeting_sent = True
+
+        question = (await self._bridge.get_next_question(_interview_session_id()) or "").strip()
+        spoken = f"{_GREETING} {question}" if question else _GREETING
+        self.session.say(spoken)
+
+    def _agent_output_in_progress(self) -> bool:
+        """True while the greeting or a turn reply is still being produced."""
+        if self.session.agent_state in ("speaking", "thinking", "initializing"):
+            return True
+        speech = self.session.current_speech
+        return speech is not None and not speech.done()
 
     async def stt_node(
         self, audio: AsyncIterable[rtc.AudioFrame], model_settings: ModelSettings
@@ -171,12 +229,69 @@ class InterviewAgent(Agent):
             finally:
                 vad_stream.end_input()
 
+        # Never wrap anext(vad_stream) in wait_for: cancelling that coroutine
+        # corrupts VADStream's internal task. Read in a background task and
+        # apply the silence timeout only to queue.get().
+        _VAD_STREAM_ENDED = object()
+        event_queue: asyncio.Queue[vad.VADEvent | object] = asyncio.Queue()
+
+        async def _read_vad_events() -> None:
+            try:
+                while True:
+                    event = await anext(vad_stream)
+                    # Silero emits INFERENCE_DONE on every window, including silence.
+                    # Waiting on those would never hit the no-speech timeout.
+                    if event.type != vad.VADEventType.INFERENCE_DONE:
+                        await event_queue.put(event)
+            except StopAsyncIteration:
+                pass
+            finally:
+                event_queue.put_nowait(_VAD_STREAM_ENDED)
+
         forward_task = asyncio.create_task(_forward_input())
+        reader_task = asyncio.create_task(_read_vad_events())
+        consecutive_silence_prompts = 0
+        in_speech = False
         try:
-            async for event in vad_stream:
+            while True:
+                try:
+                    if in_speech:
+                        event = await event_queue.get()
+                    else:
+                        event = await asyncio.wait_for(
+                            event_queue.get(),
+                            timeout=_NO_SPEECH_TIMEOUT_SECONDS,
+                        )
+                except TimeoutError:
+                    if self._agent_output_in_progress():
+                        continue
+                    if consecutive_silence_prompts < _MAX_CONSECUTIVE_SILENCE_PROMPTS:
+                        self.session.say(_NO_SPEECH_PROMPT)
+                        consecutive_silence_prompts += 1
+                        continue
+                    logger.warning(
+                        "Candidate may have disconnected or have a mic issue "
+                        "after %s consecutive silence timeouts; ending session",
+                        consecutive_silence_prompts + 1,
+                    )
+                    try:
+                        await self.session.say(_FINAL_SILENCE_MESSAGE)
+                    except Exception:
+                        logger.warning(
+                            "Failed to speak final silence message before ending session",
+                            exc_info=True,
+                        )
+                    await _end_interview_via_backend(_interview_session_id())
+                    break
+
+                if event is _VAD_STREAM_ENDED:
+                    break
+
                 if event.type == vad.VADEventType.START_OF_SPEECH:
+                    in_speech = True
                     yield stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
                 elif event.type == vad.VADEventType.END_OF_SPEECH:
+                    in_speech = False
                     speech_end_time = (
                         time.time() - event.silence_duration - event.inference_duration
                     )
@@ -186,9 +301,20 @@ class InterviewAgent(Agent):
                     )
                     transcript_event = await self._transcribe_vad_frames(event.frames)
                     if transcript_event is not None:
+                        if _matches_end_intent(transcript_event.alternatives[0].text):
+                            try:
+                                await self.session.say(_END_INTENT_CLOSING_MESSAGE)
+                            except Exception:
+                                logger.warning(
+                                    "Failed to speak end-intent closing message before ending session",
+                                    exc_info=True,
+                                )
+                            await _end_interview_via_backend(_interview_session_id())
+                            break
+                        consecutive_silence_prompts = 0
                         yield transcript_event
         finally:
-            await utils.aio.cancel_and_wait(forward_task)
+            await utils.aio.cancel_and_wait(forward_task, reader_task)
             await vad_stream.aclose()
 
     async def llm_node(
@@ -258,6 +384,7 @@ class InterviewAgent(Agent):
         )
         text = (result.text or "").strip()
         if not text:
+            self.session.say(_EMPTY_TRANSCRIPT_PROMPT)
             return None
         return stt.SpeechEvent(
             type=stt.SpeechEventType.FINAL_TRANSCRIPT,
@@ -276,6 +403,33 @@ def _latest_user_transcript(chat_ctx: llm.ChatContext) -> str:
         if message.role == "user":
             return (message.raw_text_content or "").strip()
     return ""
+
+
+async def _end_interview_via_backend(session_id: str) -> None:
+    """Best-effort POST to the same /voice/sessions/{id}/end route the frontend uses."""
+    url = f"{_BACKEND_BASE_URL}/voice/sessions/{session_id}/end"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url)
+        if 200 <= response.status_code < 300:
+            logger.info(
+                "Ended interview session %s via backend API (%s)",
+                session_id,
+                response.status_code,
+            )
+        else:
+            logger.warning(
+                "Failed to end interview session %s via backend API: HTTP %s",
+                session_id,
+                response.status_code,
+            )
+    except Exception:
+        logger.warning(
+            "Failed to end interview session %s via backend API at %s",
+            session_id,
+            url,
+            exc_info=True,
+        )
 
 
 def _interview_session_id() -> str:

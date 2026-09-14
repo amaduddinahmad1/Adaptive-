@@ -75,12 +75,32 @@ export const useInterview = () => {
   const candidateIdRef = useRef(getOrCreateCandidateId());
   const jobIdRef = useRef(readQueryParam(['job_id']) || 'demo-job');
   const languageRef = useRef(readQueryParam(['language']) || 'en');
+  const hadLiveConnectionRef = useRef(false);
+  const serverEndedRef = useRef(false);
 
   useEffect(() => {
     setConnection(
       LIVEKIT_TO_CONNECTION_STATUS[connectionState] ?? CONNECTION_STATUS.DISCONNECTED,
     );
   }, [connectionState]);
+
+  // Server-initiated room drop (e.g. silence timeout). Not a retryable 'failed'.
+  useEffect(() => {
+    if (connectionState === 'connected') {
+      hadLiveConnectionRef.current = true;
+      return;
+    }
+
+    if (connectionState !== 'disconnected') return;
+    if (status !== INTERVIEW_STATUS.IN_PROGRESS) return;
+    if (!hadLiveConnectionRef.current) return;
+    if (serverEndedRef.current) return;
+
+    serverEndedRef.current = true;
+    clearInterval(timerRef.current);
+    localStorage.removeItem(SHARED_SESSION_KEY);
+    setStatus(INTERVIEW_STATUS.COMPLETED);
+  }, [connectionState, status]);
 
   const addTranscript = (sender, text) => {
     setTranscript(prev => [...prev, { id: Date.now(), sender, text, timestamp: new Date().toISOString() }]);
