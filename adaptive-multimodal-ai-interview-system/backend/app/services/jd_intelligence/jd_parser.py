@@ -6,7 +6,9 @@ into a validated, structured JobRequirementProfile using Google Gemini API
 (google-genai SDK) with structured JSON output and single-retry error recovery.
 """
 
+import logging
 import os
+import re
 from typing import Optional
 from google import genai
 from pydantic import ValidationError
@@ -19,12 +21,32 @@ from app.integrations.llm.gemini_provider import (
 from app.integrations.llm.base import LLMProvider, LLMProviderError
 from app.schemas.job import JobRequirementProfile
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_MODEL = DEFAULT_GEMINI_MODEL
 
 JD_PARSER_SYSTEM_PROMPT = """You are an expert technical recruiter and data extraction engine.
 Your task is to analyze a raw Job Description (JD) and extract all qualification criteria into a strictly structured JSON format conforming to the requested schema.
 
 Follow these critical disambiguation and classification rules:
+
+0. REQUIREMENTS VS. RESPONSIBILITIES (CRITICAL -- classify by MEANING, not by section heading):
+   - A REQUIREMENT describes something the candidate must already possess or be able to do BEFORE
+     being hired -- a skill, technology, experience level, credential, or trait that qualifies them
+     for the role (e.g., "Python", "3 years of backend experience", "Bachelor's degree").
+   - A RESPONSIBILITY describes an action the person WILL PERFORM once hired -- a duty, task, or
+     activity that is part of the job itself, not a qualification (e.g., "Build and maintain APIs",
+     "Collaborate with the design team", "Participate in code reviews").
+   - Classify based on the MEANING of each statement, not which section heading it physically
+     appears under. JD authors are inconsistent: a duty-phrased line ("Collaborate with senior
+     engineers on production ML practices") can appear under a "Requirements" heading, and a
+     genuine qualification can appear under "Responsibilities." Extract only genuine
+     requirement-shaped statements into required_skills/required_technologies/etc. regardless of
+     heading, and do NOT extract responsibility-shaped statements even if they sit under a
+     Requirements/Qualifications heading.
+   - Test: could this statement be true of the candidate on day one, before doing any work in the
+     role? If yes, it's a requirement. If it only makes sense as something they will DO once
+     employed, it's a responsibility -- exclude it from required_skills/preferred_skills entirely.
 
 1. EXPERIENCE REQUIREMENTS (CRITICAL):
    - You must differentiate between GENERAL experience and SPECIFIC experience.
@@ -34,6 +56,9 @@ Follow these critical disambiguation and classification rules:
    - Always set `is_mandatory` (True if required/minimum, False if preferred/bonus).
 
 2. MANDATORY VS. PREFERRED REQUIREMENTS:
+   - This rule only decides WHICH BUCKET a genuine requirement goes in (mandatory vs. preferred) -- it
+     does not override rule 0. A duty-phrased statement is excluded entirely regardless of which
+     heading or wording marks it "required."
    - Mandatory: Requirements marked "required", "minimum", "must have", or listed under standard Requirements/Qualifications sections.
      * Place in `required_skills`, `required_technologies`, or mark `is_mandatory=True` for education/certifications.
    - Preferred: Requirements marked "preferred", "nice to have", "plus", "bonus", or "desired".
@@ -51,6 +76,39 @@ Follow these critical disambiguation and classification rules:
 
 Do not invent or assume requirements not mentioned in the text. Return only valid JSON conforming strictly to the requested schema.
 """
+
+# Second-layer safety net, independent of prompt quality: removes any
+# required_skills/preferred_skills entry whose phrasing starts with an
+# action/duty verb (a responsibility statement, e.g. "Collaborate with
+# senior engineers...") rather than a qualification statement (e.g.
+# "Python"). Evidence-based, not exhaustive -- covers exactly what's been
+# observed in a real false positive plus the verbs named when this fix was
+# designed. Grow this list only when a real case shows up, same discipline
+# as _SKILL_EQUIVALENCE_GROUPS/_DEGREE_EQUIVALENCE_GROUPS in
+# eligibility_engine.py. Not applied to required_technologies/education/
+# certifications -- those are named tools/credentials, not free-text
+# sentences, and haven't shown this failure mode.
+_DUTY_VERB_PATTERN = re.compile(
+    r"^(collaborate|contribute|assist|participate|build|integrate|write|develop|design|maintain|support|manage|lead)\b",
+    re.IGNORECASE,
+)
+
+
+def _filter_duty_shaped_requirements(profile: JobRequirementProfile) -> JobRequirementProfile:
+    """
+    Mutates and returns `profile`: strips any required_skills/preferred_skills
+    entry that reads as a job duty (starts with an action verb) rather than a
+    candidate qualification. See _DUTY_VERB_PATTERN's docstring above for why
+    this exists alongside, not instead of, the prompt's own rule 0.
+    """
+    for field_name in ("required_skills", "preferred_skills"):
+        original = getattr(profile, field_name)
+        kept = [item for item in original if not _DUTY_VERB_PATTERN.match(item.strip())]
+        for item in original:
+            if item not in kept:
+                logger.warning("Filtered duty-shaped requirement out of %s: %r", field_name, item)
+        setattr(profile, field_name, kept)
+    return profile
 
 
 class JDParserError(Exception):
@@ -133,7 +191,7 @@ class JDParser:
 
         # Attempt validation on initial output
         try:
-            return JobRequirementProfile.model_validate_json(raw_text)
+            return _filter_duty_shaped_requirements(JobRequirementProfile.model_validate_json(raw_text))
         except ValidationError as first_val_err:
             # Schema validation failed on first attempt: execute retry once
             return self._retry_with_validation_feedback(
@@ -173,7 +231,7 @@ class JDParser:
             raise JDParserError(f"LLM error during extraction retry: {err}") from err
 
         try:
-            return JobRequirementProfile.model_validate_json(retry_text)
+            return _filter_duty_shaped_requirements(JobRequirementProfile.model_validate_json(retry_text))
         except ValidationError as retry_val_err:
             raise JDParserError(
                 f"Schema validation failed after retry: {retry_val_err}"

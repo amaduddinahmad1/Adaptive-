@@ -21,6 +21,7 @@ from app.schemas.job import (
 from app.services.jd_intelligence.jd_parser import (
     JDParser,
     JDParserError,
+    _filter_duty_shaped_requirements,
     parse_job_description,
 )
 
@@ -577,3 +578,69 @@ def test_mandatory_vs_preferred_classification_integrity():
     assert required_set.isdisjoint(preferred_set)
     assert required_set == {"React", "Node.js"}
     assert preferred_set == {"TypeScript", "GraphQL"}
+
+
+# ---------------------------------------------------------------------------
+# Test: _filter_duty_shaped_requirements Strips Duty-Phrased Entries Directly
+# ---------------------------------------------------------------------------
+def test_filter_duty_shaped_requirements_strips_action_verb_entries():
+    """
+    Direct unit test of the safety-net filter, independent of any LLM call:
+    a duty-shaped entry (starts with an action verb -- a responsibility
+    statement, not a qualification) must be removed from required_skills/
+    preferred_skills, while genuine qualification-shaped entries survive.
+    """
+    profile = JobRequirementProfile(
+        job_title="AI Engineer",
+        required_skills=[
+            "Python",
+            "Machine Learning",
+            "Build, train, and evaluate machine learning models",
+            "Collaborate with senior engineers on production ML practices",
+            "Integrate LLM-based features into existing backend services",
+            "Write clean, well-tested Python code",
+        ],
+        preferred_skills=["Git", "Participate in code reviews"],
+    )
+
+    result = _filter_duty_shaped_requirements(profile)
+
+    assert result.required_skills == ["Python", "Machine Learning"]
+    assert result.preferred_skills == ["Git"]
+
+
+# ---------------------------------------------------------------------------
+# Test: The Filter Is Actually Wired Into parse() -- Not Just Correct in Isolation
+# ---------------------------------------------------------------------------
+def test_parse_filters_duty_shaped_requirements_from_llm_response():
+    """
+    Confirms the filter is actually applied inside JDParser.parse(), using a
+    mocked LLM response shaped exactly like the real false positive found
+    against Jazib's application: duty-phrased lines the model classified as
+    required_skills anyway.
+    """
+    payload = {
+        "job_title": "AI Engineer",
+        "experience_requirements": [],
+        "required_skills": [
+            "Machine Learning",
+            "Deep Learning",
+            "Build, train, and evaluate machine learning models",
+            "Collaborate with senior engineers on production ML practices",
+        ],
+        "preferred_skills": [],
+        "required_technologies": ["Python"],
+        "preferred_technologies": [],
+        "education_requirements": [],
+        "certifications": [],
+        "domain_experience": [],
+        "other_mandatory_requirements": [],
+    }
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = _make_mock_response(payload)
+
+    parser = JDParser(client=mock_client)
+    profile = parser.parse("Job Title: AI Engineer\nRequirements:\n- Machine Learning\n- Deep Learning\n")
+
+    assert profile.required_skills == ["Machine Learning", "Deep Learning"]
