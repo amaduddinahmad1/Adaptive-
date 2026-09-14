@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from app.integrations.llm.base import LLMProvider, LLMProviderError
+from app.integrations.llm.factory import get_default_provider
 from app.integrations.llm.gemini_provider import (
     DEFAULT_GEMINI_MODEL,
     GeminiProvider,
@@ -33,6 +34,15 @@ Follow these rules:
 7. Avoid double-counting overlapping periods for the same technology where the CV shows concurrent roles or projects.
 8. Use nonnegative numeric year values and preserve the technology names used by the CV.
 9. Keep projects, work experience, education, certifications, and achievements grounded in the source text.
+10. EXTRACT EVERY DISTINCT TERM INDIVIDUALLY (CRITICAL): When skills or technologies are listed
+    together (e.g. in a comma-separated line or a bulleted list), extract EVERY distinct named term
+    as its own separate entry -- even if two terms are conceptually related, overlapping, or one is a
+    more specific case of another. For example, "Machine Learning, Deep Learning, Supervised Learning"
+    must produce THREE separate entries: "Machine Learning", "Deep Learning", and "Supervised
+    Learning" -- do not merge, drop, or treat any of them as redundant with a broader or narrower
+    neighboring term just because they are related concepts. Only omit a term if it is truly absent
+    from the CV text -- never omit a term that IS explicitly named because a related term nearby is
+    already captured.
 """
 
 
@@ -51,10 +61,18 @@ class CVParser:
     ):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
-        self.provider = provider or GeminiProvider(
-            api_key=self.api_key,
-            model=self.model,
-        )
+
+        # api_key/model customize a specific GeminiProvider, so either being
+        # explicitly set takes precedence over the Gemini-plus-xAI-fallback
+        # default -- that default only applies to a genuinely zero-config
+        # call, e.g. the parse_cv() convenience function called with no
+        # optional args at all.
+        if provider is not None:
+            self.provider = provider
+        elif api_key is not None or model is not None:
+            self.provider = GeminiProvider(api_key=self.api_key, model=self.model)
+        else:
+            self.provider = get_default_provider()
 
     def parse(self, cv_text: str) -> CandidateProfile:
         """Parse CV text, retrying once only after schema validation failure."""
