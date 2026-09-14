@@ -82,6 +82,74 @@ Day 7's testing pass (some against real Gemini output, not just theory).
     enumerable abbreviation, so it remains unresolved — see the semantic-
     matching limitation above.
 
+- **A tool/title-implies-skill inference gap (distinct from the phrasing
+  mismatches above) was confirmed live twice in real pipeline runs**
+  (`backend/scripts/run_pipeline_smoketest.py`, using a real CV): a JD
+  requiring bare-term mandatory skills like `"Machine Learning"`/
+  `"Deep Learning"` was NOT MET against a candidate whose profile never
+  literally contains those phrases or their abbreviations, but clearly
+  demonstrates them — job title `"Machine Learning Internee"`, a `"Deep
+  Learning Specialization"` certification, and projects citing
+  Scikit-learn/XGBoost/TensorFlow/Keras. Unlike the rewording/abbreviation
+  cases above, no synonym table can express this — it requires domain
+  knowledge (`"TensorFlow is a deep learning framework"`), not textual
+  similarity. Fixed with a new, strictly opt-in semantic-inference layer:
+  `MatchStatus.MET_BY_INFERENCE`, resolved by
+  `semantic_skill_matcher.judge_unmatched_mandatory_skills()`, which
+  batches every remaining unmatched mandatory `SKILL`/`TECHNOLOGY`
+  requirement into a single LLM call (never one call per requirement) and
+  always attaches an evidence-citing reason string, enforced non-empty by
+  a `RequirementMatchResult` validator so an inferred match can never be
+  silently indistinguishable from a deterministic exact-string `MET`
+  anywhere it's displayed or persisted. Opt-in via
+  `check_eligibility(provider=...)`: omitting `provider` keeps this
+  function 100% deterministic and network-free, unchanged from before this
+  layer existed — every existing eligibility test relies on this.
+  A small curated `_SKILL_EQUIVALENCE_GROUPS` table (currently just
+  ML/DL, evidence-based only, same discipline as the degree table) runs
+  first and resolves literal synonym mismatches for free before this more
+  expensive layer is ever reached.
+
+- **Follow-up, not yet fixed: the semantic-inference layer's fail-safe path
+  swallows the real underlying error without logging it.** When the batched
+  LLM call in `judge_unmatched_mandatory_skills()` fails (provider error or
+  a malformed response), every affected requirement correctly becomes
+  `MANUAL_REVIEW_REQUIRED` rather than a fabricated `NOT_MET_MANDATORY` —
+  but the actual exception (e.g. a transient Gemini 503, or a schema
+  validation failure) is discarded, not logged. This was observed directly:
+  one real pipeline run silently hit this path and produced
+  `overall_eligible=True` for the same underlying reason a completely
+  different, fully-confirmed run also produced `True` — both looked
+  identical from the top-level boolean alone, and were only distinguished
+  by inspecting each `RequirementMatchResult.reason` individually. Worth
+  adding structured logging (e.g. `logger.warning` with the caught
+  exception) in `semantic_skill_matcher.py`'s two `except` blocks so an
+  operator can tell "the LLM was consulted and found nothing" apart from
+  "the LLM was never successfully consulted at all" without manually
+  diffing reason strings.
+
+- **Follow-up, not yet fixed: some mandatory JD requirements are
+  dispositions, not checkable skills, and are currently misclassified as
+  `SKILL` type anyway.** Observed live: a JD requiring `"Willingness to
+  learn new tools"` as a mandatory skill can never be satisfied by exact,
+  alias, or even semantic-inference matching, since no real CV states a
+  disposition like this as a literal skill/technology — it isn't evidence
+  of a checkable capability the way "TensorFlow" or "Machine Learning" is.
+  This isn't a matching-logic bug (matching is working as designed); it's
+  that `requirement_classifier.py`/JD parsing routes this kind of language
+  into `SKILL` when it more properly belongs alongside `domain_experience`/
+  `other_mandatory_requirements` — items that always resolve to
+  `MANUAL_REVIEW_REQUIRED` because there's genuinely no `CandidateProfile`
+  field to check them against. Deliberately not fixed today: reclassifying
+  this is a requirement-classifier design change, a different kind of
+  decision than the eligibility-matching work above, and blurring the two
+  together risked conflating two separate problems. Worked around at the
+  JD-authoring level in the meantime (moved out of the mandatory list
+  entirely in `sample_jd_ai_engineer_intern_v3.txt`), which is itself weak
+  evidence for the reclassification argument: a requirement that
+  structurally can never be verified against a `CandidateProfile`
+  arguably shouldn't be mandatory in a well-written JD to begin with.
+
 - **Technology-specific experience years are LLM-estimated, not derived
   from date math.** Unlike general experience (computed via
   `date_utils.py` from actual work history date ranges),

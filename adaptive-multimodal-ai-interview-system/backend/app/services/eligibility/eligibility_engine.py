@@ -28,6 +28,14 @@ have no corresponding CandidateProfile field at all, and a candidate's
 free-text joining_availability may not be parseable into a number of days.
 In all these cases, fabricating a pass or a fail would be worse than
 surfacing the item for a human to check (see format_eligibility_report).
+
+MatchStatus.MET_BY_INFERENCE is a distinct, non-deterministic verdict for a
+mandatory SKILL/TECHNOLOGY requirement resolved via an LLM judgment call
+(see semantic_skill_matcher.py) rather than exact/alias matching — always
+carries a reason string (enforced on RequirementMatchResult), and is never
+rendered or persisted as an indistinguishable plain MET. Strictly opt-in via
+check_eligibility(provider=...): omitting provider keeps this function
+100% deterministic and network-free, exactly as before this layer existed.
 """
 
 import re
@@ -35,8 +43,9 @@ from datetime import date
 from enum import Enum
 from typing import List, Optional, Set
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
+from app.integrations.llm.base import LLMProvider
 from app.schemas.candidate import CandidateProfile
 from app.schemas.job import (
     ClassifiedRequirement,
@@ -49,6 +58,7 @@ from app.services.eligibility.experience_matcher import (
     ExperienceMatchResult,
     match_all_experience_requirements,
 )
+from app.services.eligibility.semantic_skill_matcher import judge_unmatched_mandatory_skills
 
 
 class ApplicationDetails(BaseModel):
@@ -66,6 +76,7 @@ class RecruiterConstraints(BaseModel):
 
 class MatchStatus(str, Enum):
     MET = "met"
+    MET_BY_INFERENCE = "met_by_inference"
     NOT_MET_MANDATORY = "not_met_mandatory"
     NOT_FOUND_PREFERRED = "not_found_preferred"
     MANUAL_REVIEW_REQUIRED = "manual_review_required"
@@ -79,9 +90,28 @@ class ExperienceEligibilityResult(BaseModel):
 
 
 class RequirementMatchResult(BaseModel):
-    """Composes a Day 3 ClassifiedRequirement with its match verdict."""
+    """
+    Composes a Day 3 ClassifiedRequirement with its match verdict.
+
+    reason is None for every deterministic verdict (exact/alias/substring
+    match, or no match at all) -- there is nothing beyond the verdict itself
+    to explain. It is enforced non-empty specifically when status is
+    MET_BY_INFERENCE (see the validator below), so an LLM-inferred match can
+    never be silently indistinguishable from a deterministic exact-string
+    MET anywhere this result is displayed or persisted -- the report
+    formatter and the JSONB dump written to Application.eligibility_result
+    both carry this field automatically since it's a real model field, not
+    something bolted on downstream.
+    """
     requirement: ClassifiedRequirement
     status: MatchStatus
+    reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _reason_required_for_inference(self) -> "RequirementMatchResult":
+        if self.status == MatchStatus.MET_BY_INFERENCE and not self.reason:
+            raise ValueError("reason is required when status is MET_BY_INFERENCE")
+        return self
 
 
 class SalaryEligibilityResult(BaseModel):
@@ -197,9 +227,49 @@ def _education_match(degree_level: str, education_entries: List[str]) -> bool:
     return any(_case_insensitive_substring_match(alias, education_entries) for alias in _degree_aliases(degree_level))
 
 
+# Curated skill/technology abbreviation equivalents, mirroring
+# _DEGREE_EQUIVALENCE_GROUPS. Deliberately narrow -- only ML/DL, the two
+# terms actually observed failing exact-match in real pipeline runs -- not
+# padded out with plausible-looking additions (AI, NLP, etc.) that have no
+# observed evidence yet. Add more only when real data shows a real gap, same
+# discipline as the degree table and the date-format fix.
+#
+# This table can ONLY fix a literal synonym/abbreviation mismatch (JD says
+# "ML", candidate says "Machine Learning"). It cannot and is not intended to
+# fix the tool/title-implies-skill case (candidate lists "TensorFlow" but
+# never writes "Machine Learning" or "ML" anywhere) -- that is a domain-
+# knowledge inference, not a synonym relationship, and is handled by the
+# separate, more expensive semantic_skill_matcher layer below, which only
+# runs for whatever this table (and exact matching) still couldn't resolve.
+_SKILL_EQUIVALENCE_GROUPS: List[Set[str]] = [
+    {"machine learning", "ml"},
+    {"deep learning", "dl"},
+]
+
+
+def _skill_aliases(term: str) -> Set[str]:
+    """Every phrasing interchangeable with `term`, per _SKILL_EQUIVALENCE_GROUPS, plus the term itself."""
+    normalized = term.strip().lower()
+    aliases = {normalized}
+    for group in _SKILL_EQUIVALENCE_GROUPS:
+        if normalized in group:
+            aliases |= group
+    return aliases
+
+
+def _skill_alias_match(requirement_text: str, candidate_terms: List[str]) -> bool:
+    """Exact match after normalization, expanded across curated skill-abbreviation equivalents (e.g. "ML" <-> "Machine Learning")."""
+    return any(_case_insensitive_exact_match(alias, candidate_terms) for alias in _skill_aliases(requirement_text))
+
+
 def _match_classified_requirement(requirement: ClassifiedRequirement, candidate: CandidateProfile) -> MatchStatus:
     """
-    Matches a single non-experience ClassifiedRequirement against a candidate.
+    Matches a single non-experience ClassifiedRequirement against a candidate
+    using only free, deterministic checks -- no LLM call happens here. A
+    MANDATORY SKILL/TECHNOLOGY requirement that comes back NOT_MET_MANDATORY
+    from this function is not necessarily final: see
+    _match_all_classified_requirements, which may still escalate it to the
+    semantic_skill_matcher layer.
 
     SKILL and TECHNOLOGY requirements are both checked against the combined
     set of candidate.skills + candidate.technologies, not just the matching
@@ -209,7 +279,10 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     filed as a skill by one and a technology by the other. Confirmed
     happening on real (non-test) data during the first full pipeline E2E
     run; see LIMITATIONS.md. This mirrors the same real-vocabulary-mismatch
-    reasoning as experience_matcher._lookup_technology_years.
+    reasoning as experience_matcher._lookup_technology_years. On top of exact
+    matching, _skill_alias_match additionally covers curated abbreviation
+    equivalents (e.g. "ML" <-> "Machine Learning") — see
+    _SKILL_EQUIVALENCE_GROUPS for what this can and can't fix.
 
     EDUCATION requirements match the degree_level through _education_match,
     which additionally covers curated degree-abbreviation equivalents (e.g.
@@ -227,7 +300,10 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     status) surfaces immediately rather than silently misclassifying.
     """
     if requirement.requirement_type in (RequirementType.SKILL, RequirementType.TECHNOLOGY):
-        found = _case_insensitive_exact_match(requirement.requirement, candidate.skills + candidate.technologies)
+        candidate_terms = candidate.skills + candidate.technologies
+        found = _case_insensitive_exact_match(requirement.requirement, candidate_terms) or _skill_alias_match(
+            requirement.requirement, candidate_terms
+        )
     elif requirement.requirement_type == RequirementType.CERTIFICATION:
         found = _case_insensitive_substring_match(requirement.requirement, candidate.certifications)
     elif requirement.requirement_type == RequirementType.EDUCATION:
@@ -239,6 +315,79 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     if found:
         return MatchStatus.MET
     return MatchStatus.NOT_MET_MANDATORY if requirement.category == RequirementCategory.MANDATORY else MatchStatus.NOT_FOUND_PREFERRED
+
+
+def _match_all_classified_requirements(
+    classified_reqs: List[ClassifiedRequirement],
+    candidate: CandidateProfile,
+    *,
+    provider: Optional[LLMProvider] = None,
+) -> List[RequirementMatchResult]:
+    """
+    Resolves every non-experience ClassifiedRequirement, then -- only if
+    `provider` is explicitly given -- escalates whatever mandatory
+    SKILL/TECHNOLOGY requirements are still unresolved after deterministic
+    matching to the semantic_skill_matcher layer, in a single batched call.
+
+    The semantic layer is strictly opt-in via `provider`, deliberately not
+    defaulted to get_default_provider(): check_eligibility() (and therefore
+    this function) is called by many existing tests that deliberately set up
+    a mandatory skill/technology mismatch as their whole premise, none of
+    which pass a provider. Defaulting this to an always-on real provider
+    would turn every one of those into a real, uncontrolled network call the
+    moment this feature shipped -- so `provider=None` means exactly today's
+    pre-existing behavior, byte-for-byte unchanged, and a caller must
+    explicitly opt in (e.g. scripts/run_pipeline_smoketest.py passes
+    get_default_provider()) to exercise the new capability at all.
+
+    A requirement that reaches the semantic layer but is missing from its
+    result (provider/parse failure, or the model simply omitted it) becomes
+    MANUAL_REVIEW_REQUIRED, never a fabricated NOT_MET_MANDATORY -- an
+    infrastructure failure must never irreversibly block an otherwise
+    eligible candidate.
+    """
+    provisional = [
+        (req, _match_classified_requirement(req, candidate))
+        for req in classified_reqs
+        if req.requirement_type != RequirementType.EXPERIENCE
+    ]
+
+    if provider is None:
+        return [RequirementMatchResult(requirement=req, status=status) for req, status in provisional]
+
+    # NOT_MET_MANDATORY is only ever returned for a mandatory requirement
+    # (see _match_classified_requirement's final line), so no separate
+    # category check is needed here.
+    escalation_candidates = [
+        req
+        for req, status in provisional
+        if status == MatchStatus.NOT_MET_MANDATORY and req.requirement_type in (RequirementType.SKILL, RequirementType.TECHNOLOGY)
+    ]
+    escalation_ids = {id(req) for req in escalation_candidates}
+
+    judgments = judge_unmatched_mandatory_skills(escalation_candidates, candidate, provider=provider)
+
+    results: List[RequirementMatchResult] = []
+    for req, status in provisional:
+        if id(req) not in escalation_ids:
+            results.append(RequirementMatchResult(requirement=req, status=status))
+            continue
+
+        judgment = judgments.get(req.requirement)
+        if judgment is None:
+            results.append(
+                RequirementMatchResult(
+                    requirement=req,
+                    status=MatchStatus.MANUAL_REVIEW_REQUIRED,
+                    reason="Semantic skill match could not be completed automatically; requires manual review.",
+                )
+            )
+        elif judgment.matched:
+            results.append(RequirementMatchResult(requirement=req, status=MatchStatus.MET_BY_INFERENCE, reason=judgment.reason))
+        else:
+            results.append(RequirementMatchResult(requirement=req, status=MatchStatus.NOT_MET_MANDATORY, reason=judgment.reason))
+
+    return results
 
 
 def _check_joining_availability(
@@ -287,6 +436,7 @@ def check_eligibility(
     constraints: RecruiterConstraints,
     *,
     today: Optional[date] = None,
+    provider: Optional[LLMProvider] = None,
 ) -> EligibilityResult:
     """
     Evaluates a candidate's eligibility for a job, combining experience,
@@ -295,6 +445,14 @@ def check_eligibility(
     overall_eligible is False if and only if some check's status is
     NOT_MET_MANDATORY. MANUAL_REVIEW_REQUIRED never blocks eligibility on its
     own, even for a mandatory requirement — see module docstring.
+
+    provider is optional and strictly opt-in: when omitted, requirement
+    matching is 100% deterministic and network-free, byte-for-byte identical
+    to this function's behavior before the semantic-inference layer existed.
+    Passing a provider (e.g. app.integrations.llm.factory.get_default_provider())
+    additionally allows mandatory SKILL/TECHNOLOGY requirements that survive
+    exact and alias matching to be escalated to an LLM judgment call — see
+    _match_all_classified_requirements and semantic_skill_matcher.py.
     """
     experience_matches = match_all_experience_requirements(jd_profile, candidate, today=today)
     assert len(experience_matches) == len(jd_profile.experience_requirements), (
@@ -316,11 +474,7 @@ def check_eligibility(
         for requirement, match in zip(jd_profile.experience_requirements, experience_matches)
     ]
 
-    requirement_results = [
-        RequirementMatchResult(requirement=req, status=_match_classified_requirement(req, candidate))
-        for req in classified_reqs
-        if req.requirement_type != RequirementType.EXPERIENCE
-    ]
+    requirement_results = _match_all_classified_requirements(classified_reqs, candidate, provider=provider)
 
     joining_availability_result = _check_joining_availability(application, constraints)
     salary_result = _check_salary(application, constraints)
@@ -341,6 +495,7 @@ def check_eligibility(
 
 _STATUS_LABELS = {
     MatchStatus.MET: "MET",
+    MatchStatus.MET_BY_INFERENCE: "MET (inferred)",
     MatchStatus.NOT_MET_MANDATORY: "NOT MET",
     MatchStatus.NOT_FOUND_PREFERRED: "NOT FOUND - Preferred",
     MatchStatus.MANUAL_REVIEW_REQUIRED: "MANUAL REVIEW REQUIRED",
@@ -411,7 +566,10 @@ def format_eligibility_report(result: EligibilityResult) -> str:
             )
             target_list.append(req_result.requirement.requirement)
             continue
-        lines.append(f"{req_result.requirement.requirement}: {_STATUS_LABELS[req_result.status]}")
+        line = f"{req_result.requirement.requirement}: {_STATUS_LABELS[req_result.status]}"
+        if req_result.reason:
+            line += f" — {req_result.reason}"
+        lines.append(line)
 
     joining_line = _format_joining_availability_line(result.joining_availability_result)
     if joining_line:

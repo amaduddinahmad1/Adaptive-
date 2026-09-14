@@ -11,26 +11,31 @@ item, even a mandatory one.
 """
 
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.integrations.llm.base import LLMProvider, LLMProviderError
 from app.schemas.candidate import CandidateProfile, TechnologyExperience, WorkExperience
 from app.schemas.job import (
+    ClassifiedRequirement,
     EducationRequirement,
     ExperienceRequirement,
     ExperienceRequirementType,
     JobRequirementProfile,
+    RequirementCategory,
     RequirementType,
 )
 from app.services.eligibility.eligibility_engine import (
     ApplicationDetails,
     MatchStatus,
     RecruiterConstraints,
+    RequirementMatchResult,
     check_eligibility,
     format_eligibility_report,
 )
 from app.services.eligibility.experience_matcher import ExperienceMatchResult
+from app.services.eligibility.semantic_skill_matcher import SkillJudgment, SkillJudgmentBatch
 from app.services.jd_intelligence.requirement_classifier import classify_requirements
 
 TODAY = date(2026, 9, 9)
@@ -84,9 +89,20 @@ def _baseline_constraints() -> RecruiterConstraints:
     return RecruiterConstraints(max_notice_period_days=30, salary_min=80000.0, salary_max=120000.0)
 
 
-def _run(jd, candidate, application, constraints):
+def _run(jd, candidate, application, constraints, provider=None):
     classified = classify_requirements(jd)
-    return check_eligibility(jd, classified, candidate, application, constraints, today=TODAY)
+    return check_eligibility(jd, classified, candidate, application, constraints, today=TODAY, provider=provider)
+
+
+def _mock_provider(response_text: str) -> MagicMock:
+    """A fake LLMProvider (never a real API call) returning a fixed structured response."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.generate_structured.return_value = response_text
+    return provider
+
+
+def _judgment_batch_json(*judgments: SkillJudgment) -> str:
+    return SkillJudgmentBatch(judgments=list(judgments)).model_dump_json()
 
 
 # ---------------------------------------------------------------------------
@@ -536,3 +552,220 @@ def test_multiple_simultaneous_mandatory_failures_all_surfaced():
     assert result.salary_result.status == MatchStatus.NOT_MET_MANDATORY
     assert general_result.status == MatchStatus.MET  # unrelated requirement, unaffected
     assert result.overall_eligible is False
+
+
+# ---------------------------------------------------------------------------
+# Semantic skill matching (MatchStatus.MET_BY_INFERENCE) -- opt-in via `provider`
+#
+# check_eligibility()'s semantic-inference layer only activates when a
+# provider is explicitly passed (see eligibility_engine.py's design note) --
+# every test above this point omits `provider` and must therefore remain
+# byte-for-byte unaffected by this layer's existence, which the full suite
+# passing confirms. Every test below explicitly injects a fake LLMProvider
+# (never a real API call) to test the layer itself.
+# ---------------------------------------------------------------------------
+def _semantic_jd() -> JobRequirementProfile:
+    """Minimal JD isolating only the mandatory SKILL/TECHNOLOGY requirements under test."""
+    return JobRequirementProfile(
+        job_title="AI Engineer",
+        required_skills=["Machine Learning"],
+        required_technologies=["Kubernetes"],
+    )
+
+
+def _semantic_application() -> ApplicationDetails:
+    return ApplicationDetails(joining_availability="immediate", salary_expectation=50000.0)
+
+
+def _semantic_constraints() -> RecruiterConstraints:
+    return RecruiterConstraints()  # no constraints stated -- always MET, keeps focus on skill/tech results
+
+
+def test_reason_required_when_status_is_met_by_inference():
+    """
+    Direct test of the validator: RequirementMatchResult must refuse to be
+    constructed with status=MET_BY_INFERENCE and no reason. This is the
+    structural guarantee that an LLM-inferred match can never be silently
+    indistinguishable from a deterministic exact-string MET anywhere
+    downstream -- not just something we remember to set correctly.
+    """
+    requirement = ClassifiedRequirement(
+        requirement="Machine Learning",
+        category=RequirementCategory.MANDATORY,
+        requirement_type=RequirementType.SKILL,
+    )
+
+    with pytest.raises(Exception):
+        RequirementMatchResult(requirement=requirement, status=MatchStatus.MET_BY_INFERENCE, reason=None)
+
+    # A reason present succeeds -- confirms the failure above is specifically about the missing reason.
+    RequirementMatchResult(requirement=requirement, status=MatchStatus.MET_BY_INFERENCE, reason="because X")
+
+
+def test_semantic_layer_true_positive_resolves_to_met_by_inference_with_reason():
+    """
+    The concrete bug this layer fixes: candidate has real ML signal
+    (TensorFlow) but never literally writes "Machine Learning" or "ML" --
+    a mocked provider judgment (never a real API call) resolves it to
+    MET_BY_INFERENCE with the reason carried through to the result.
+    """
+    candidate = CandidateProfile(technologies=["TensorFlow", "Python"])
+    provider = _mock_provider(
+        _judgment_batch_json(
+            SkillJudgment(
+                requirement="Machine Learning",
+                matched=True,
+                reason="Candidate lists TensorFlow, a deep learning framework.",
+            ),
+            SkillJudgment(requirement="Kubernetes", matched=False, reason="No container orchestration experience listed."),
+        )
+    )
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+
+    ml_result = next(r for r in result.requirement_results if r.requirement.requirement == "Machine Learning")
+    assert ml_result.status == MatchStatus.MET_BY_INFERENCE
+    assert ml_result.reason == "Candidate lists TensorFlow, a deep learning framework."
+    provider.generate_structured.assert_called_once()
+
+
+def test_semantic_layer_false_positive_guard_stays_not_met_with_reason():
+    """
+    The false-positive guard: a mandatory requirement with no genuine
+    supporting evidence must stay NOT_MET_MANDATORY even after going
+    through the semantic layer -- proving the wiring doesn't rubber-stamp
+    everything that reaches this fallback path. The candidate here has zero
+    AI/ML or infra signal at all.
+    """
+    candidate = CandidateProfile(technologies=["React", "CSS"])
+    provider = _mock_provider(
+        _judgment_batch_json(
+            SkillJudgment(
+                requirement="Machine Learning",
+                matched=False,
+                reason="No ML/AI-related technologies, titles, or projects present.",
+            ),
+            SkillJudgment(requirement="Kubernetes", matched=False, reason="No container orchestration experience listed."),
+        )
+    )
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+
+    ml_result = next(r for r in result.requirement_results if r.requirement.requirement == "Machine Learning")
+    k8s_result = next(r for r in result.requirement_results if r.requirement.requirement == "Kubernetes")
+    assert ml_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert ml_result.reason == "No ML/AI-related technologies, titles, or projects present."
+    assert k8s_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert result.overall_eligible is False
+
+
+def test_semantic_layer_batches_multiple_requirements_into_a_single_call():
+    """Two unmatched mandatory requirements must produce exactly one provider call, not two."""
+    candidate = CandidateProfile(technologies=["TensorFlow"])
+    provider = _mock_provider(
+        _judgment_batch_json(
+            SkillJudgment(requirement="Machine Learning", matched=True, reason="TensorFlow listed."),
+            SkillJudgment(requirement="Kubernetes", matched=False, reason="No evidence."),
+        )
+    )
+
+    _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+
+    assert provider.generate_structured.call_count == 1
+
+
+def test_alias_table_resolves_before_ever_reaching_the_semantic_layer():
+    """
+    A requirement resolvable by the curated skill-alias table (e.g. "ML")
+    must never reach the provider at all -- the provider here raises if
+    called at all, which would fail this test if the ordering were wrong.
+    """
+    jd = JobRequirementProfile(job_title="AI Engineer", required_skills=["Machine Learning"])
+    candidate = CandidateProfile(skills=["ML"])  # literal abbreviation, resolvable by the alias table alone
+    provider = MagicMock(spec=LLMProvider)
+    provider.generate_structured.side_effect = AssertionError("must not be called -- alias match should resolve this first")
+
+    result = _run(jd, candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+
+    ml_result = next(r for r in result.requirement_results if r.requirement.requirement == "Machine Learning")
+    assert ml_result.status == MatchStatus.MET
+    assert ml_result.reason is None
+    provider.generate_structured.assert_not_called()
+
+
+def test_provider_omitted_never_calls_semantic_layer_and_stays_deterministic():
+    """
+    Omitting `provider` entirely must behave exactly as it did before this
+    layer existed: no network call attempted (there's no provider to call),
+    and the requirement stays NOT_MET_MANDATORY.
+    """
+    candidate = CandidateProfile(technologies=["TensorFlow"])
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints())
+
+    ml_result = next(r for r in result.requirement_results if r.requirement.requirement == "Machine Learning")
+    assert ml_result.status == MatchStatus.NOT_MET_MANDATORY
+    assert ml_result.reason is None
+
+
+def test_semantic_layer_provider_failure_fails_safe_to_manual_review():
+    """
+    A provider failure (the same class of transient error seen in real
+    pipeline runs today) must never fabricate a NOT_MET_MANDATORY verdict --
+    it must fail safe to MANUAL_REVIEW_REQUIRED, consistent with how
+    domain_experience/other_mandatory_requirements already handle "no
+    reliable way to verify" elsewhere in this module. An infrastructure
+    failure must never irreversibly block an otherwise eligible candidate.
+    """
+    candidate = CandidateProfile(technologies=["TensorFlow"])
+    provider = MagicMock(spec=LLMProvider)
+    provider.generate_structured.side_effect = LLMProviderError("simulated transient failure")
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+
+    ml_result = next(r for r in result.requirement_results if r.requirement.requirement == "Machine Learning")
+    assert ml_result.status == MatchStatus.MANUAL_REVIEW_REQUIRED
+    assert ml_result.reason is not None
+    assert result.overall_eligible is True  # MANUAL_REVIEW_REQUIRED never blocks eligibility on its own
+
+
+def test_semantic_layer_report_surfaces_reason_for_inferred_match():
+    """format_eligibility_report() must render the reason inline for MET_BY_INFERENCE, not just the bare status."""
+    candidate = CandidateProfile(technologies=["TensorFlow"])
+    provider = _mock_provider(
+        _judgment_batch_json(
+            SkillJudgment(requirement="Machine Learning", matched=True, reason="Candidate lists TensorFlow."),
+            SkillJudgment(requirement="Kubernetes", matched=True, reason="Assumed present for this report-rendering test."),
+        )
+    )
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+    report = format_eligibility_report(result)
+
+    assert "Machine Learning: MET (inferred) — Candidate lists TensorFlow." in report
+
+
+def test_report_surfaces_reason_for_not_met_mandatory_from_semantic_layer():
+    """
+    Real gap found and fixed: format_eligibility_report() used to only
+    render req_result.reason for MET_BY_INFERENCE, so a semantic-layer
+    NOT_MET_MANDATORY verdict (which also carries a real, specific reason)
+    was invisible in the printed report even though it was correctly
+    persisted in the DB. The report must now show it too.
+    """
+    candidate = CandidateProfile(technologies=["React", "CSS"])
+    provider = _mock_provider(
+        _judgment_batch_json(
+            SkillJudgment(
+                requirement="Machine Learning",
+                matched=False,
+                reason="No ML/AI-related technologies, titles, or projects present.",
+            ),
+            SkillJudgment(requirement="Kubernetes", matched=False, reason="No container orchestration experience listed."),
+        )
+    )
+
+    result = _run(_semantic_jd(), candidate, _semantic_application(), _semantic_constraints(), provider=provider)
+    report = format_eligibility_report(result)
+
+    assert "Machine Learning: NOT MET — No ML/AI-related technologies, titles, or projects present." in report
