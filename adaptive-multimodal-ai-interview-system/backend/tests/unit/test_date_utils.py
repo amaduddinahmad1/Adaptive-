@@ -52,6 +52,12 @@ def test_parse_date_string_unparseable_returns_none_without_crashing():
     assert parse_date_string("", today=TODAY) is None
 
 
+def test_parse_date_string_ordinal_day_month_year_format():
+    """Real gap found in run_real_interview.py's actual CV parse output (see LIMITATIONS.md discussion)."""
+    assert parse_date_string("1st April 2026", today=TODAY) == date(2026, 4, 1)
+    assert parse_date_string("30th April 2026", today=TODAY) == date(2026, 4, 30)
+
+
 # ---------------------------------------------------------------------------
 # calculate_role_duration_years
 # ---------------------------------------------------------------------------
@@ -148,6 +154,21 @@ def test_role_with_none_dates_excluded_without_crashing():
 
 def test_empty_work_experience_returns_zero():
     assert calculate_total_general_experience([], today=TODAY) == 0.0
+
+
+def test_short_internship_with_ordinal_dates_not_silently_dropped():
+    """
+    End-to-end regression for the real gap: a 1-month internship expressed
+    with ordinal-day dates must now contribute ~1 month to the general
+    experience total, not be silently excluded.
+    """
+    work_experience = [
+        WorkExperience(position="ML Internee", start_date="1st April 2026", end_date="30th April 2026"),
+    ]
+    total = calculate_total_general_experience(work_experience, today=TODAY)
+    expected_days = (date(2026, 4, 30) - date(2026, 4, 1)).days
+    assert total == expected_days / 365.25
+    assert total > 0.0
 
 
 def test_malformed_end_before_start_entry_excluded_from_aggregation():

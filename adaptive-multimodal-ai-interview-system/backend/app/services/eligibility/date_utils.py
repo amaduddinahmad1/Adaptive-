@@ -26,8 +26,18 @@ Design notes (approved before implementation):
 - A role whose end date precedes its start date is malformed data (not a
   real range) and is excluded rather than allowed to contribute a negative
   duration to the total.
+- Ordinal-day dates (e.g. "1st April 2026") preserve the actual parsed day
+  rather than normalizing to the 1st like the Month/year-only case above.
+  Found via a real CV parse (not assumed): normalizing both a start and end
+  ordinal-day date to the 1st of their respective months can collapse an
+  entire short role's duration to zero, which is worse than the previous
+  behavior of excluding it outright. Only "%d %B %Y" (full month name) is
+  supported for now — "%d %b %Y" (abbreviated month) was considered but has
+  no observed real-world fixture yet, so it's deliberately left out rather
+  than added on pattern-symmetry alone; add it if/when real data shows it.
 """
 
+import re
 from datetime import date, datetime
 from typing import List, Optional, Tuple
 
@@ -36,6 +46,17 @@ from app.schemas.candidate import WorkExperience
 DAYS_PER_YEAR = 365.25
 
 _MONTH_YEAR_FORMATS = ("%B %Y", "%b %Y")
+_DAY_MONTH_YEAR_FORMATS = ("%d %B %Y",)
+
+_ORDINAL_DAY_PATTERN = re.compile(r"^(\d{1,2})(st|nd|rd|th)\b(.*)", re.IGNORECASE)
+
+
+def _strip_ordinal_day_suffix(text: str) -> str:
+    """'1st April 2026' -> '1 April 2026'. Only strips a leading day-ordinal; leaves anything else untouched."""
+    match = _ORDINAL_DAY_PATTERN.match(text)
+    if match:
+        return f"{match.group(1)}{match.group(3)}"
+    return text
 
 
 def parse_date_string(value: Optional[str], *, today: date) -> Optional[date]:
@@ -44,8 +65,8 @@ def parse_date_string(value: Optional[str], *, today: date) -> Optional[date]:
     missing, empty, or unparseable.
 
     Recognized forms: "present" (-> today), "YYYY-MM", "YYYY", "Month YYYY",
-    "Mon YYYY". See module docstring for the normalization and fail-safe
-    rules applied.
+    "Mon YYYY", "Dst/nd/rd/th Month YYYY" (e.g. "1st April 2026"). See module
+    docstring for the normalization and fail-safe rules applied.
     """
     if value is None:
         return None
@@ -67,6 +88,14 @@ def parse_date_string(value: Optional[str], *, today: date) -> Optional[date]:
         try:
             parsed = datetime.strptime(text, fmt)
             return date(parsed.year, parsed.month, 1)
+        except ValueError:
+            continue
+
+    normalized_day = _strip_ordinal_day_suffix(text)
+    for fmt in _DAY_MONTH_YEAR_FORMATS:
+        try:
+            parsed = datetime.strptime(normalized_day, fmt)
+            return date(parsed.year, parsed.month, parsed.day)
         except ValueError:
             continue
 
