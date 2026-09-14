@@ -12,6 +12,8 @@ email-validator>=2.0
 
 # LLM Providers
 google-genai>=1.0.0
+xai-sdk>=1.19.0
+groq>=1.7.0
 
 # Environment & Utilities
 python-dotenv>=1.0.0

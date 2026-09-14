@@ -11,11 +11,12 @@ from typing import Optional
 from google import genai
 from pydantic import ValidationError
 
+from app.integrations.llm.factory import get_default_provider
 from app.integrations.llm.gemini_provider import (
     DEFAULT_GEMINI_MODEL,
     GeminiProvider,
 )
-from app.integrations.llm.base import LLMProviderError
+from app.integrations.llm.base import LLMProvider, LLMProviderError
 from app.schemas.job import JobRequirementProfile
 
 DEFAULT_MODEL = DEFAULT_GEMINI_MODEL
@@ -68,6 +69,7 @@ class JDParser:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         client: Optional[genai.Client] = None,
+        provider: Optional[LLMProvider] = None,
     ):
         """
         Initialize the JDParser.
@@ -76,15 +78,23 @@ class JDParser:
             api_key: Gemini API key. If omitted, read from GEMINI_API_KEY env var.
             model: Model identifier. Defaults to GEMINI_MODEL env var or 'gemini-3.6-flash'.
             client: Optional pre-configured genai.Client instance (useful for unit testing and dependency injection).
+            provider: Optional pre-built LLMProvider, taking full precedence over api_key/model/client.
         """
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
 
-        self.provider = GeminiProvider(
-            api_key=self.api_key,
-            model=self.model,
-            client=client,
-        )
+        # api_key/model/client customize a specific GeminiProvider (also how
+        # tests inject a mock client), so any of them being explicitly set
+        # takes precedence over the Gemini-plus-xAI-fallback default -- that
+        # default only applies to a genuinely zero-config call, e.g. the
+        # parse_job_description() convenience function called with no
+        # optional args at all.
+        if provider is not None:
+            self.provider = provider
+        elif api_key is not None or model is not None or client is not None:
+            self.provider = GeminiProvider(api_key=self.api_key, model=self.model, client=client)
+        else:
+            self.provider = get_default_provider()
 
     def parse(self, jd_text: str) -> JobRequirementProfile:
         """
@@ -175,6 +185,7 @@ def parse_job_description(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
     client: Optional[genai.Client] = None,
+    provider: Optional[LLMProvider] = None,
 ) -> JobRequirementProfile:
     """
     Convenience function to parse a raw Job Description into JobRequirementProfile.
@@ -184,9 +195,10 @@ def parse_job_description(
         api_key: Optional Gemini API key.
         model: Optional model override. Defaults to 'gemini-3.6-flash'.
         client: Optional Gemini Client instance.
+        provider: Optional pre-built LLMProvider, taking full precedence over api_key/model/client.
 
     Returns:
         Validated JobRequirementProfile.
     """
-    parser = JDParser(api_key=api_key, model=model, client=client)
+    parser = JDParser(api_key=api_key, model=model, client=client, provider=provider)
     return parser.parse(jd_text)

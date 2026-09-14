@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.services.interview_intelligence.models import ANSWER_PASS_THRESHOLD, AnswerEvaluation, Question
 from app.integrations.llm.base import LLMProvider, LLMProviderError
-from app.integrations.llm.gemini_provider import GeminiProvider
+from app.integrations.llm.factory import get_default_provider
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ def evaluate_answer(
     """Evaluate an answer using schema-constrained LLM rubric scores."""
     logger.info("Evaluating answer for %s", question.expected_knowledge_area)
     scores = _request_scores(
-        provider=provider or GeminiProvider(),
+        provider=provider or get_default_provider(),
         question=question,
         candidate_answer=candidate_answer.strip(),
     )
