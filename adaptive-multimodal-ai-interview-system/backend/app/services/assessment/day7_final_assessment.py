@@ -2,6 +2,7 @@ import logging
 from typing import Iterable, List
 
 from app.services.interview_intelligence.models import (
+    ANSWER_PASS_THRESHOLD,
     AnswerEvaluation,
     FinalAssessmentReport,
     GapAnalysisEntry,
@@ -18,13 +19,56 @@ logger = logging.getLogger(__name__)
 
 
 def _derive_eligibility(candidate_profile: CandidateProfile, job_requirements: JobRequirementProfile, skill_matrix: Iterable[SkillMatrixEntry]) -> str:
-    required_skills = set(job_requirements.required_skills)
-    matrix_skills = {item.skill_name for item in skill_matrix}
-    minimum_requirement = bool(required_skills.intersection(matrix_skills))
+    """
+    Real bug found and fixed: minimum_requirement used to check only
+    whether a required skill's NAME appeared in skill_matrix, via
+    `required_skills.intersection(matrix_skills)`. build_skill_matrix()
+    unconditionally creates a 0.0 placeholder SkillMatrixEntry for every
+    required skill regardless of whether it was ever actually assessed --
+    so that intersection could never be empty as long as the JD had any
+    required skill at all, making minimum_requirement vacuously True for
+    every candidate, including one who never answered a single question
+    about it. Confirmed live: a near-zero-scoring interview and a
+    genuinely competent one produced byte-identical eligibility_result and
+    recommendation.
+
+    Fixed by requiring genuine demonstrated evidence -- an entry that was
+    actually assessed (assessment_count > 0) and scored at or above
+    ANSWER_PASS_THRESHOLD -- rather than mere name presence.
+
+    Deliberately NOT scoped to job_requirements.required_skills
+    specifically: required_skills is already validated at the application-
+    eligibility stage (the semantic-inference layer, using real CV
+    evidence -- see eligibility_engine.py). The interview stage's own job
+    is to check whether the candidate demonstrated real competence in
+    whatever was actually assessed live, not re-litigate the identical
+    named list a second time -- question_set only samples a subset of
+    interview_plan.skill_areas (itself broader than required_skills), so a
+    real interview is not guaranteed to ever test a required skill by its
+    exact literal name. Checked against real data: scoping to
+    required_skills specifically would have made a genuinely competent
+    interview AND a near-zero one both "Fail" (neither happened to test
+    "Machine Learning"/"Deep Learning" by name), failing to distinguish
+    them at all -- the opposite of the intended fix.
+
+    job_level in {"Intern", "Junior"} in level_match below is deliberately
+    left unchanged, not a bug: derive_experience_level()'s tiers have no
+    level below "Intern" (a floor of 0 years of experience), so every
+    possible candidate_level is definitionally appropriate for an entry-
+    level role. Removing this clause would incorrectly fail genuine entry-
+    level candidates applying to entry-level jobs -- the opposite of the
+    JD's own intent, and worse than today's behavior, not safer. The
+    observed bug was caused entirely by minimum_requirement's vacuity
+    above; this clause was already correct, targeted leniency.
+    """
+    demonstrated_competence = any(
+        item.assessment_count > 0 and item.proficiency_score >= ANSWER_PASS_THRESHOLD
+        for item in skill_matrix
+    )
     candidate_level = derive_experience_level(candidate_profile)
     job_level = derive_job_experience_level(job_requirements)
     level_match = candidate_level in {"Mid-Level", "Senior"} or job_level in {"Intern", "Junior"}
-    return "Pass" if minimum_requirement and level_match else "Fail"
+    return "Pass" if demonstrated_competence and level_match else "Fail"
 
 
 def generate_final_assessment(
