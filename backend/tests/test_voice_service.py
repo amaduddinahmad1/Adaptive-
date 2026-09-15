@@ -1,14 +1,20 @@
 """
 Tests for Voice Service.
+
+Sessions are created from a real Application row. candidate_id / job_id on the
+in-memory session are derived from Application.candidate_id and
+Application.job_posting_id (stringified only at the schema boundary).
 """
 from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
+from app.models.application import Application
 from app.services.voice.service import VoiceInterviewService
 from app.schemas.voice_session import InterviewStatus, ConnectionStatus
 from app.integrations.livekit.config import LiveKitConfig
 from app.integrations.livekit.service import LiveKitService
+from tests.conftest import make_mock_voice_service
 
 
 class _FailingLiveKit:
@@ -30,43 +36,49 @@ class _FailingLiveKit:
     async def delete_room(self, room_name: str):
         raise RuntimeError("delete_room failed")
 
+
+def _identity(application: Application) -> str:
+    return f"candidate-{application.candidate_id}"
+
+
 @pytest.mark.asyncio
-async def test_voice_interview_service_lifecycle():
-    service = VoiceInterviewService()
-    
-    # Create
-    session = await service.create_session("cand_1", "job_1")
-    assert session.candidate_id == "cand_1"
+async def test_voice_interview_service_lifecycle(eligible_application: Application):
+    service = make_mock_voice_service()
+    identity = _identity(eligible_application)
+
+    session = await service.create_session(eligible_application)
+    assert session.application_id == eligible_application.id
+    assert session.candidate_id == str(eligible_application.candidate_id)
+    assert session.job_id == str(eligible_application.job_posting_id)
     assert session.interview_status == InterviewStatus.PENDING
-    
-    # Retrieve
+
     retrieved = await service.get_session(session.session_id)
     assert retrieved is not None
     assert retrieved.session_id == session.session_id
-    
-    # Start
+    assert retrieved.application_id == eligible_application.id
+
     start_res = await service.start_interview(session.session_id)
     assert start_res["status"] == "started"
     assert start_res["session_id"] == session.session_id
     assert start_res["room_name"] == f"interview-{session.session_id}"
-    assert start_res["identity"] == "candidate-cand_1"
+    assert start_res["identity"] == identity
     assert start_res["token"] == (
-        f"mock_token_interview-{session.session_id}_candidate-cand_1"
+        f"mock_token_interview-{session.session_id}_{identity}"
     )
     assert "livekit_url" in start_res
-    
+
     retrieved = await service.get_session(session.session_id)
     assert retrieved.interview_status == InterviewStatus.IN_PROGRESS
     assert retrieved.connection_status == ConnectionStatus.CONNECTED
     assert "token" not in retrieved.model_dump()
-    
-    # End
+
     end_res = await service.end_interview(session.session_id)
     assert end_res["status"] == "ended"
-    
+
     retrieved = await service.get_session(session.session_id)
     assert retrieved.interview_status == InterviewStatus.COMPLETED
     assert retrieved.connection_status == ConnectionStatus.DISCONNECTED
+
 
 @pytest.mark.asyncio
 async def test_voice_service_invalid_session():
@@ -76,18 +88,31 @@ async def test_voice_service_invalid_session():
 
 
 @pytest.mark.asyncio
-async def test_start_succeeds_when_livekit_create_room_fails():
+async def test_create_session_rejects_ineligible_application(
+    ineligible_application: Application,
+):
+    service = VoiceInterviewService()
+    with pytest.raises(ValueError, match="Application is not eligible for interview"):
+        await service.create_session(ineligible_application)
+    assert service.session_manager.list_sessions() == []
+
+
+@pytest.mark.asyncio
+async def test_start_succeeds_when_livekit_create_room_fails(
+    eligible_application: Application,
+):
     service = VoiceInterviewService(livekit_service=_FailingLiveKit())
-    session = await service.create_session("cand_1", "job_1")
+    session = await service.create_session(eligible_application)
+    identity = _identity(eligible_application)
 
     start_res = await service.start_interview(session.session_id)
 
     assert start_res["status"] == "started"
     assert start_res["session_id"] == session.session_id
     assert start_res["room_name"] == f"interview-{session.session_id}"
-    assert start_res["identity"] == "candidate-cand_1"
+    assert start_res["identity"] == identity
     assert start_res["token"] == (
-        f"token-for-interview-{session.session_id}-candidate-cand_1"
+        f"token-for-interview-{session.session_id}-{identity}"
     )
     retrieved = await service.get_session(session.session_id)
     assert retrieved.interview_status == InterviewStatus.IN_PROGRESS
@@ -95,9 +120,11 @@ async def test_start_succeeds_when_livekit_create_room_fails():
 
 
 @pytest.mark.asyncio
-async def test_end_succeeds_when_livekit_delete_room_fails():
+async def test_end_succeeds_when_livekit_delete_room_fails(
+    eligible_application: Application,
+):
     service = VoiceInterviewService(livekit_service=_FailingLiveKit())
-    session = await service.create_session("cand_1", "job_1")
+    session = await service.create_session(eligible_application)
     await service.start_interview(session.session_id)
 
     end_res = await service.end_interview(session.session_id)
@@ -120,25 +147,28 @@ JOIN_CONTRACT_FIELDS = {
 
 
 @pytest.mark.asyncio
-async def test_start_mock_mode_join_contract_fields():
-    service = VoiceInterviewService()
-    session = await service.create_session("cand_1", "job_1")
+async def test_start_mock_mode_join_contract_fields(eligible_application: Application):
+    service = make_mock_voice_service()
+    session = await service.create_session(eligible_application)
+    identity = _identity(eligible_application)
 
     start_res = await service.start_interview(session.session_id)
 
     assert set(start_res.keys()) == JOIN_CONTRACT_FIELDS
     assert start_res["status"] == "started"
     assert start_res["room_name"] == f"interview-{session.session_id}"
-    assert start_res["identity"] == "candidate-cand_1"
+    assert start_res["identity"] == identity
     assert start_res["token"] == (
-        f"mock_token_interview-{session.session_id}_candidate-cand_1"
+        f"mock_token_interview-{session.session_id}_{identity}"
     )
     assert isinstance(start_res["livekit_url"], str)
     assert "token" not in (await service.get_session(session.session_id)).model_dump()
 
 
 @pytest.mark.asyncio
-async def test_start_credentialed_token_matches_room_and_identity():
+async def test_start_credentialed_token_matches_room_and_identity(
+    eligible_application: Application,
+):
     livekit = LiveKitService(
         LiveKitConfig(
             url="wss://example.livekit.cloud",
@@ -147,9 +177,9 @@ async def test_start_credentialed_token_matches_room_and_identity():
         )
     )
     service = VoiceInterviewService(livekit_service=livekit)
-    session = await service.create_session("cand_1", "job_1")
+    session = await service.create_session(eligible_application)
     expected_room = f"interview-{session.session_id}"
-    expected_identity = "candidate-cand_1"
+    expected_identity = _identity(eligible_application)
 
     create_room = AsyncMock(return_value={"name": expected_room, "sid": ""})
     with patch.object(livekit, "create_room", new=create_room):
@@ -163,3 +193,18 @@ async def test_start_credentialed_token_matches_room_and_identity():
     assert claims["video"]["room"] == expected_room
     assert claims["sub"] == expected_identity
     create_room.assert_awaited_once_with(expected_room)
+
+
+@pytest.mark.asyncio
+async def test_create_session_does_not_query_db_again(
+    eligible_application: Application, db_session
+):
+    """Service receives the already-loaded Application; it must not insert rows."""
+    service = VoiceInterviewService()
+    application_count = db_session.query(Application).count()
+
+    session = await service.create_session(eligible_application)
+
+    assert session.application_id == eligible_application.id
+    assert db_session.query(Application).count() == application_count
+    assert service.session_manager.get_session(session.session_id) is not None

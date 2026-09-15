@@ -1,8 +1,0 @@
-# Test Sentences for STT/TTS Benchmarking
-# Add sample sentences in English, Urdu, and Roman Urdu below.
-# These are used for evaluating STT accuracy and TTS quality.
-
-Hello, welcome to the interview.
-Please introduce yourself.
-What are your key strengths?
-Tell me about a challenging project you worked on.

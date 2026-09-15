@@ -1,5 +1,0 @@
-{
-  "version": "0.1.0",
-  "description": "Eligibility screening result determining whether a candidate qualifies for interview. Produced by Eligibility Engine (Amad), consumed by Interview flow (Jazib).",
-  "data": {}
-}

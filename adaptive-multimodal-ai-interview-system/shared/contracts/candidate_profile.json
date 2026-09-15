@@ -1,5 +1,0 @@
-{
-  "version": "0.1.0",
-  "description": "Parsed candidate profile extracted from CV and application form. Produced by CV Intelligence (Amad), consumed by Eligibility Engine (Amad) and Interview Intelligence (Faizan).",
-  "data": {}
-}

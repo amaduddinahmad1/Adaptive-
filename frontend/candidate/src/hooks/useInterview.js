@@ -181,6 +181,7 @@ export const useInterview = () => {
 
   const handleEnd = useCallback(async (extra) => {
     clearInterval(timerRef.current);
+    serverEndedRef.current = true; 
     const payload =
       extra && typeof extra === 'object' && !('nativeEvent' in extra)
         ? extra

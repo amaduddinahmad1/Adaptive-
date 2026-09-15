@@ -1,5 +1,0 @@
-{
-  "version": "0.1.0",
-  "description": "Evaluation of a single candidate answer including correctness, depth and confidence signals. Produced by Interview Intelligence (Faizan), consumed by Assessment (Faizan).",
-  "data": {}
-}

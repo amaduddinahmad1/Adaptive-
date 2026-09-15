@@ -1,10 +1,13 @@
 """
 Voice API routes.
 """
-from typing import Any, Optional
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
+from sqlalchemy.orm import Session
 
+from app.db.session import get_db
+from app.models.application import Application
 from app.schemas.voice_session import (
     VoiceSessionCreate,
     VoiceSessionSchema,
@@ -27,14 +30,22 @@ def get_voice_service(request: Request) -> VoiceInterviewService:
 @router.post("/sessions", response_model=VoiceSessionSchema)
 async def create_session(
     request: VoiceSessionCreate,
+    db: Session = Depends(get_db),
     service: VoiceInterviewService = Depends(get_voice_service),
 ) -> Any:
-    """Create a new voice session."""
-    return await service.create_session(
-        candidate_id=request.candidate_id,
-        job_id=request.job_id,
-        language=request.language,
+    """Create a new voice session for an existing Application."""
+    application = (
+        db.query(Application).filter(Application.id == request.application_id).first()
     )
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    try:
+        return await service.create_session(
+            application=application,
+            language=request.language,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/sessions/{session_id}", response_model=VoiceSessionSchema)
@@ -52,12 +63,11 @@ async def get_session(
 @router.post("/sessions/{session_id}/start", response_model=VoiceSessionStartResponse)
 async def start_interview(
     session_id: str,
-    candidate: Optional[str] = Query(default=None),
     service: VoiceInterviewService = Depends(get_voice_service),
 ) -> Any:
     """Start the interview pipeline and return the LiveKit join contract."""
     try:
-        return await service.start_interview(session_id, candidate_id=candidate)
+        return await service.start_interview(session_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

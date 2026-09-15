@@ -8,10 +8,14 @@ from app.schemas.tts import TTSConfig, TTSResult
 def test_voice_session_creation():
     session = VoiceSessionSchema(
         session_id="test_123",
-        candidate_id="cand_1",
-        job_id="job_1",
+        application_id=1,
+        candidate_id="5",
+        job_id="7",
         language="en"
     )
+    assert session.application_id == 1
+    assert session.candidate_id == "5"
+    assert session.job_id == "7"
     assert session.session_id == "test_123"
     assert session.interview_status == InterviewStatus.PENDING
     assert session.connection_status == ConnectionStatus.DISCONNECTED

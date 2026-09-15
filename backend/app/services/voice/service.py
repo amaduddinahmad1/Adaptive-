@@ -4,7 +4,8 @@ Voice Interview Service.
 import uuid
 import logging
 from typing import Optional, Dict, Any
-from app.schemas.voice_session import VoiceSessionSchema, VoiceSessionCreate, InterviewStatus, ConnectionStatus
+from app.models.application import Application
+from app.schemas.voice_session import VoiceSessionSchema, InterviewStatus, ConnectionStatus
 from app.core.config import settings
 from app.integrations.livekit.config import LiveKitConfig
 from app.integrations.livekit.service import LiveKitService
@@ -28,26 +29,34 @@ class VoiceInterviewService:
             )
         )
 
-    async def create_session(self, candidate_id: str, job_id: str, language: str = "en") -> VoiceSessionSchema:
-        """Create a new voice interview session."""
+    async def create_session(
+        self, application: Application, language: str = "en"
+    ) -> VoiceSessionSchema:
+        """Create an in-memory voice session bound to a validated Application."""
+        if application.overall_eligible is False:
+            raise ValueError("Application is not eligible for interview")
+
         session_id = str(uuid.uuid4())
         session = VoiceSessionSchema(
             session_id=session_id,
-            candidate_id=candidate_id,
-            job_id=job_id,
-            language=language
+            application_id=application.id,
+            candidate_id=str(application.candidate_id),
+            job_id=str(application.job_posting_id),
+            language=language,
         )
         self.session_manager.create_session(session)
-        logger.info(f"Created session {session_id} for candidate {candidate_id}")
+        logger.info(
+            f"Created session {session_id} for application {application.id}"
+        )
         return session
 
-    async def start_interview(
-        self, session_id: str, candidate_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def start_interview(self, session_id: str) -> Dict[str, Any]:
         """Start the interview pipeline for a session."""
         session = self.session_manager.get_session(session_id)
         if not session:
             raise ValueError("Session not found")
+        if session.application_id is None:
+            raise ValueError("Session is not linked to an application")
 
         stt_provider = STTProviderFactory.get_provider()
 
@@ -61,7 +70,7 @@ class VoiceInterviewService:
         self.pipelines[session_id] = pipeline
 
         room_name = f"interview-{session_id}"
-        identity = f"candidate-{candidate_id or session.candidate_id}"
+        identity = f"candidate-{session.candidate_id}"
         try:
             await self.livekit.create_room(room_name)
         except Exception:

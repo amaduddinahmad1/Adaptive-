@@ -22,13 +22,16 @@ class ConnectionStatus(str, Enum):
     RECONNECTING = "RECONNECTING"
     FAILED = "FAILED"
 
+class VoiceSessionCreate(BaseModel):
+    """Create a voice session for an existing Application. Application is the source of truth."""
+    application_id: int
+    language: str = "en"
+
 class VoiceSessionBase(BaseModel):
+    application_id: int
     candidate_id: str
     job_id: str
     language: str = "en"
-
-class VoiceSessionCreate(VoiceSessionBase):
-    pass
 
 class VoiceSessionUpdate(BaseModel):
     interview_status: Optional[InterviewStatus] = None
