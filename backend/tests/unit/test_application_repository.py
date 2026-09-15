@@ -1,12 +1,13 @@
 """
 tests/unit/test_application_repository.py
 
-Unit tests for app.services.persistence.application_repository.generate_interview_token(),
-Phase 1 of the interview-invitation email feature. Uses a plain, unpersisted
-Application() instance and a MagicMock Session -- these tests only need to
-confirm the function's own logic (guards, field assignment, flush-not-commit
-discipline), not real database behavior, which is covered separately by the
-live smoketest run.
+Unit tests for app.services.persistence.application_repository's
+generate_interview_token() and mark_invitation_sent() (interview-invitation
+email feature, Phases 1 and 3). Uses a plain, unpersisted Application()
+instance and a MagicMock Session -- these tests only need to confirm each
+function's own logic (guards, field assignment, flush-not-commit
+discipline), not real database behavior, which is covered separately by
+the live smoketest run.
 """
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
@@ -14,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.models.application import Application
-from app.services.persistence.application_repository import generate_interview_token
+from app.services.persistence.application_repository import generate_interview_token, mark_invitation_sent
 
 
 def _make_eligible_application(**overrides) -> Application:
@@ -111,5 +112,19 @@ def test_flushes_but_never_commits():
 
     generate_interview_token(db, application)
 
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+
+
+def test_mark_invitation_sent_sets_email_sent_at_and_flushes():
+    """Only ever called by the caller after send_interview_invitation() succeeds -- see test_email_service.py."""
+    application = _make_eligible_application(email_sent_at=None)
+    db = MagicMock()
+
+    before = datetime.now(timezone.utc)
+    mark_invitation_sent(db, application)
+    after = datetime.now(timezone.utc)
+
+    assert before <= application.email_sent_at <= after
     db.flush.assert_called_once()
     db.commit.assert_not_called()

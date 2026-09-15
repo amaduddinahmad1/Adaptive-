@@ -187,3 +187,19 @@ def generate_interview_token(db: Session, application: Application) -> Applicati
     application.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=INTERVIEW_TOKEN_TTL_HOURS)
     db.flush()
     return application
+
+
+def mark_invitation_sent(db: Session, application: Application) -> Application:
+    """
+    Records that the interview invitation email was actually sent.
+    Deliberately separate from generate_interview_token() and called only
+    after app.services.notifications.email_service.send_interview_invitation()
+    returns without raising -- email_sent_at must never be set optimistically,
+    since it's the field a future retry mechanism would use to find
+    "eligible but not yet notified" applications (the same role
+    overall_eligible plays for run_interview_for_application.py's own
+    "eligible but not yet interviewed" query). Flushes only, caller commits.
+    """
+    application.email_sent_at = datetime.now(timezone.utc)
+    db.flush()
+    return application
