@@ -48,6 +48,17 @@ class Application(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Interview invitation link (Phase 1 of email notification feature).
+    # interview_token/token_expires_at are populated together, later, by the
+    # invite-generation step -- not at Application creation time -- so both
+    # stay nullable with no DB-level default. token_used has a single
+    # always-correct value from row creation onward, so it gets a real
+    # NOT NULL + server default instead.
+    interview_token: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     candidate: Mapped["Candidate"] = relationship(back_populates="applications")
     job_posting: Mapped["JobPosting"] = relationship(back_populates="applications")
     interview_result: Mapped[Optional["InterviewResult"]] = relationship(
