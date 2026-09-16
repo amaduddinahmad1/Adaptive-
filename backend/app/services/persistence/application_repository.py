@@ -31,8 +31,18 @@ All functions take a Session and do not commit -- the caller commits once
 after every step succeeds, so a failure partway through a pipeline run
 never leaves an orphaned Candidate/JobPosting/Application with no row
 pointing to it.
+
+generate_interview_token() (Phase 1 of the interview-invitation email
+feature) follows the same discipline. It's deliberately a plain, reusable
+function rather than logic embedded in any one script: today its only
+caller is scripts/run_pipeline_smoketest.py, but the real production
+trigger will eventually be a live application-submission API endpoint
+(not yet built) calling this exact same function once overall_eligible is
+known to be True.
 """
+import secrets
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from app.models.application import Application
@@ -49,6 +59,8 @@ from app.services.eligibility.eligibility_engine import (
 )
 from app.services.interview_intelligence.models import FinalAssessmentReport, GapAnalysisEntry, InterviewPlan
 from sqlalchemy.orm import Session
+
+INTERVIEW_TOKEN_TTL_HOURS = 48
 
 
 def get_or_create_candidate(db: Session, identity: ApplicantIdentity) -> Candidate:
@@ -131,3 +143,47 @@ def create_interview_result(
     db.add(interview_result)
     db.flush()
     return interview_result
+
+
+def generate_interview_token(db: Session, application: Application) -> Application:
+    """
+    Generates and sets a fresh interview_token/token_expires_at pair on an
+    already-eligible Application, so the candidate can be emailed a
+    single-use interview link (app/services/notifications/email_service.py,
+    a later step in this same feature, is the actual sender).
+
+    Refuses to run in two cases, both real footguns rather than hypothetical
+    edge cases:
+
+    - application.overall_eligible is False: mirrors the same re-verification
+      discipline as scripts/run_interview_for_application.py's eligibility
+      check, kept even though callers are expected to only invoke this on an
+      eligible application, as a safety net against a race condition or a
+      caller bug rather than trusting the caller alone.
+    - application already has an active (unexpired, unused) token: silently
+      overwriting it would invalidate a link that may already be sitting in
+      the candidate's inbox. Regenerating an expired or already-used token is
+      fine and expected (e.g. a candidate requesting a fresh link).
+
+    Same discipline as every other function in this module: flushes only, so
+    the token is visible on `application` immediately without ending the
+    caller's transaction -- the caller commits once, after every step in its
+    pipeline succeeds.
+    """
+    if not application.overall_eligible:
+        raise ValueError(
+            f"Application {application.id} is not eligible (overall_eligible=False) -- "
+            "refusing to generate an interview token."
+        )
+
+    if application.interview_token is not None and not application.token_used:
+        if application.token_expires_at and application.token_expires_at > datetime.now(timezone.utc):
+            raise ValueError(
+                f"Application {application.id} already has an active, unexpired interview "
+                "token -- refusing to overwrite it. Regenerating an expired/used token is fine."
+            )
+
+    application.interview_token = secrets.token_urlsafe(32)
+    application.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=INTERVIEW_TOKEN_TTL_HOURS)
+    db.flush()
+    return application
