@@ -224,3 +224,187 @@ def test_voice_session_not_found(client: TestClient):
     assert client.get(f"/api/v1/voice/sessions/{missing_id}/status").status_code == 404
     assert client.post(f"/api/v1/voice/sessions/{missing_id}/start").status_code == 404
     assert client.post(f"/api/v1/voice/sessions/{missing_id}/end").status_code == 404
+    assert client.get(f"/api/v1/voice/sessions/{missing_id}/next-question").status_code == 404
+    assert (
+        client.post(
+            f"/api/v1/voice/sessions/{missing_id}/response",
+            json={"text": "hello"},
+        ).status_code
+        == 404
+    )
+
+
+def test_start_initializes_real_question_engine_over_http(
+    client: TestClient, eligible_application: Application, db_session
+):
+    from app.schemas.candidate import CandidateProfile
+    from app.schemas.job import JobRequirementProfile
+    from app.services.interview_intelligence.day1_interview_plan import generate_interview_plan
+    from app.services.interview_intelligence.day2_question_generation import generate_questions
+
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    session_id = created["session_id"]
+    interview_result_count = db_session.query(InterviewResult).count()
+
+    start_body = client.post(f"/api/v1/voice/sessions/{session_id}/start").json()
+    assert start_body["status"] == "started"
+    assert start_body["identity"] == _expected_identity(eligible_application)
+    assert start_body["room_name"] == f"interview-{session_id}"
+
+    expected = generate_questions(
+        JobRequirementProfile.model_validate(eligible_application.job_profile_snapshot),
+        CandidateProfile.model_validate(eligible_application.candidate_profile),
+        generate_interview_plan(
+            JobRequirementProfile.model_validate(eligible_application.job_profile_snapshot),
+            CandidateProfile.model_validate(eligible_application.candidate_profile),
+        ),
+    )
+    question_body = client.get(
+        f"/api/v1/voice/sessions/{session_id}/next-question"
+    ).json()
+    assert question_body["question"] == expected[0].question_text
+    assert question_body["question"] != "Could you tell me about yourself?"
+    assert db_session.query(InterviewResult).count() == interview_result_count
+
+
+def _patch_http_assess_answers(weighted_total: float = 72.0):
+    from app.services.assessment.assessment_service import AssessmentService
+    from app.services.interview_intelligence.models import AnswerEvaluation
+
+    def _assess(*args, **kwargs):
+        question_set = args[1] if len(args) >= 3 else args[0]
+        question = list(question_set)[0]
+        return [
+            AnswerEvaluation(
+                question_text=question.question_text,
+                expected_knowledge_area=question.expected_knowledge_area,
+                question_type=question.question_type,
+                weighted_total=weighted_total,
+                technical_correctness=weighted_total,
+                problem_solving=weighted_total,
+                completeness=weighted_total,
+                reasoning=weighted_total,
+                communication=weighted_total,
+                pass_fail=weighted_total >= 65.0,
+                skills_covered=list(question.skills_covered),
+                recommendation_note="test evaluation",
+            )
+        ]
+
+    from unittest.mock import patch
+
+    return patch.object(AssessmentService, "assess_answers", side_effect=_assess)
+
+
+def test_http_end_without_answers_does_not_persist_interview_result(
+    client: TestClient, eligible_application: Application, db_session
+):
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    session_id = created["session_id"]
+    client.post(f"/api/v1/voice/sessions/{session_id}/start")
+    before = db_session.query(InterviewResult).count()
+
+    end_response = client.post(f"/api/v1/voice/sessions/{session_id}/end")
+
+    assert end_response.status_code == 200
+    body = end_response.json()
+    assert body["status"] == "ended"
+    assert body["session_id"] == session_id
+    assert body["assessment_status"] == "not_persistable"
+    assert "not persistable yet" in body["detail"]
+    assert body["interview_result_id"] is None
+    assert db_session.query(InterviewResult).count() == before
+
+
+def test_http_completed_interview_persists_one_interview_result(
+    client: TestClient, eligible_application: Application, db_session
+):
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    session_id = created["session_id"]
+    start_body = client.post(f"/api/v1/voice/sessions/{session_id}/start").json()
+    assert start_body["status"] == "started"
+
+    question = client.get(f"/api/v1/voice/sessions/{session_id}/next-question").json()
+    assert question["question"]
+    assert question["question"] != "Could you tell me about yourself?"
+
+    with _patch_http_assess_answers():
+        response_body = client.post(
+            f"/api/v1/voice/sessions/{session_id}/response",
+            json={"text": "I used FastAPI with PostgreSQL in production."},
+        ).json()
+
+    assert response_body["evaluation"]["weighted_total"] == 72.0
+    assert "score" not in response_body["evaluation"]
+    assert response_body["next_question"] != "Could you tell me about yourself?"
+    before = db_session.query(InterviewResult).count()
+
+    end_response = client.post(f"/api/v1/voice/sessions/{session_id}/end")
+    assert end_response.status_code == 200
+    body = end_response.json()
+    assert body["status"] == "ended"
+    assert body["assessment_status"] == "persisted"
+    assert body["application_id"] == eligible_application.id
+    assert body["interview_result_id"] is not None
+    assert body["recommendation"]
+    assert body["interview_eligibility_result"]
+
+    results = (
+        db_session.query(InterviewResult)
+        .filter(InterviewResult.application_id == eligible_application.id)
+        .all()
+    )
+    assert len(results) == before + 1
+    result = results[0]
+    assert result.application_id == eligible_application.id
+    assert result.recommendation == body["recommendation"]
+    assert result.interview_eligibility_result == body["interview_eligibility_result"]
+    assert result.interview_plan is not None
+    assert result.qa_transcript is not None
+    assert "turns" in result.qa_transcript
+    assert result.gap_analysis is not None
+    assert "entries" in result.gap_analysis
+
+    repeat = client.post(f"/api/v1/voice/sessions/{session_id}/end").json()
+    assert repeat["assessment_status"] == "already_persisted"
+    assert repeat["interview_result_id"] == body["interview_result_id"]
+    assert (
+        db_session.query(InterviewResult)
+        .filter(InterviewResult.application_id == eligible_application.id)
+        .count()
+        == 1
+    )
+
+
+def test_http_ineligible_application_end_does_not_persist(
+    client: TestClient, eligible_application: Application, db_session
+):
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    session_id = created["session_id"]
+    client.post(f"/api/v1/voice/sessions/{session_id}/start")
+    with _patch_http_assess_answers():
+        client.post(
+            f"/api/v1/voice/sessions/{session_id}/response",
+            json={"text": "A detailed production answer."},
+        )
+
+    eligible_application.overall_eligible = False
+    db_session.commit()
+    before = db_session.query(InterviewResult).count()
+
+    body = client.post(f"/api/v1/voice/sessions/{session_id}/end").json()
+    assert body["assessment_status"] == "not_persistable"
+    assert "not eligible" in body["detail"]
+    assert db_session.query(InterviewResult).count() == before

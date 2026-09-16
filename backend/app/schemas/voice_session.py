@@ -61,3 +61,24 @@ class VoiceSessionStartResponse(BaseModel):
     room_name: str
     token: str
     identity: str
+
+
+class VoiceSessionAnswerRequest(BaseModel):
+    text: str
+
+
+class VoiceSessionNextQuestionResponse(BaseModel):
+    question: Optional[str] = None
+
+
+class VoiceSessionEndResponse(BaseModel):
+    """Returned by POST .../sessions/{id}/end after LiveKit cleanup and optional persistence."""
+
+    status: str
+    session_id: str
+    application_id: Optional[int] = None
+    interview_result_id: Optional[int] = None
+    assessment_status: str
+    detail: Optional[str] = None
+    recommendation: Optional[str] = None
+    interview_eligibility_result: Optional[str] = None

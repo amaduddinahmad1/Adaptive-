@@ -19,7 +19,7 @@ server = AgentServer()
 async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
 
-    # InterviewAgent node overrides call whisper_local / MockInterviewBridge /
+    # InterviewAgent node overrides call whisper_local / Interview Intelligence /
     # TTSProviderFactory. VAD here is what stt_node uses as the end-of-turn signal.
     session = AgentSession(
         vad=silero.VAD.load(),

@@ -20,7 +20,46 @@ from app.db.base import Base
 from app.models.application import Application
 from app.models.candidate import Candidate
 from app.models.job_posting import JobPosting
+from app.schemas.candidate import CandidateProfile
+from app.schemas.job import JobRequirementProfile
 import app.models  # noqa: F401  — populate Base.metadata
+
+
+SAMPLE_CANDIDATE_PROFILE = CandidateProfile(
+    skills=["Python", "FastAPI", "PostgreSQL"],
+    technologies=["Python", "FastAPI", "PostgreSQL"],
+    projects=[
+        {
+            "name": "Interview Platform",
+            "description": "Built FastAPI services backed by PostgreSQL.",
+            "technologies": ["FastAPI", "PostgreSQL"],
+        }
+    ],
+    work_experience=[
+        {
+            "position": "Backend Engineer",
+            "company": "Acme",
+            "start_date": "2022-01",
+            "end_date": "present",
+            "description": "Designed FastAPI endpoints and PostgreSQL schemas for production APIs.",
+        }
+    ],
+    education=["BS Computer Science"],
+    certifications=[],
+    achievements=["Reduced API latency by 40%"],
+    technology_specific_experience=[
+        {"technology": "FastAPI", "years": 2.0},
+        {"technology": "PostgreSQL", "years": 2.0},
+    ],
+).model_dump(mode="json")
+
+SAMPLE_JOB_PROFILE = JobRequirementProfile(
+    job_title="Backend Engineer",
+    required_skills=["Python", "FastAPI", "PostgreSQL"],
+    preferred_skills=["Docker"],
+    required_technologies=["Python", "FastAPI", "PostgreSQL"],
+    preferred_technologies=["Docker"],
+).model_dump(mode="json")
 
 
 @compiles(JSONB, "sqlite")
@@ -63,8 +102,8 @@ def seed_application(
     )
     job_posting = JobPosting(
         job_title="Backend Engineer",
-        raw_jd_text="Build and maintain backend services.",
-        parsed_profile={"job_title": "Backend Engineer"},
+        raw_jd_text="Build and maintain backend services with Python, FastAPI, and PostgreSQL.",
+        parsed_profile=SAMPLE_JOB_PROFILE,
     )
     db.add_all([candidate, job_posting])
     db.flush()
@@ -72,8 +111,8 @@ def seed_application(
     application = Application(
         candidate_id=candidate.id,
         job_posting_id=job_posting.id,
-        candidate_profile={"full_name": candidate.full_name},
-        job_profile_snapshot=job_posting.parsed_profile,
+        candidate_profile=SAMPLE_CANDIDATE_PROFILE,
+        job_profile_snapshot=SAMPLE_JOB_PROFILE,
         joining_availability="immediate",
         salary_expectation=Decimal("120000"),
         eligibility_result={"overall_eligible": overall_eligible},

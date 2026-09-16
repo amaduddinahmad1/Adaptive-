@@ -2,7 +2,8 @@
 Interview voice agent using LiveKit Agents node overrides.
 
 These STT/LLM/TTS node overrides still make synchronous/batch-style calls to our
-existing Day 3 providers (WhisperLocalSTTProvider.transcribe(), MockInterviewBridge,
+existing Day 3 providers (WhisperLocalSTTProvider.transcribe(),
+HttpInterviewBridge -> InterviewIntelligenceBridge,
 TTSProviderFactory.synthesize_with_fallback()). That is intentional: it reuses the
 tested batch pipeline rather than the framework's native streaming pattern, and can
 be optimized to real streaming later if latency requires it.
@@ -43,7 +44,7 @@ from livekit.agents import (
 from livekit.agents.types import APIConnectOptions, NotGivenOr
 from livekit.agents.utils.audio import AudioByteStream
 
-from app.integrations.pipecat.interview_bridge import MockInterviewBridge
+from app.integrations.pipecat.interview_bridge import HttpInterviewBridge, InterviewBridge
 from app.integrations.stt.providers.whisper_local import WhisperLocalSTTProvider
 from app.integrations.tts.factory import TTSProviderFactory
 from app.schemas.stt import STTConfig
@@ -121,11 +122,11 @@ class _PipelinePlaceholderLLM(llm.LLM):
 
     @property
     def model(self) -> str:
-        return "mock_interview_bridge"
+        return "interview_intelligence"
 
     @property
     def provider(self) -> str:
-        return "mock_interview_bridge"
+        return "interview_intelligence"
 
     def chat(
         self,
@@ -170,7 +171,7 @@ class _PipelinePlaceholderTTS(tts.TTS):
 
 
 class InterviewAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, bridge: InterviewBridge | None = None) -> None:
         super().__init__(
             instructions="You are conducting a structured voice interview.",
             stt=_PipelinePlaceholderSTT(),
@@ -178,7 +179,7 @@ class InterviewAgent(Agent):
             tts=_PipelinePlaceholderTTS(),
         )
         self._whisper = WhisperLocalSTTProvider()
-        self._bridge = MockInterviewBridge()
+        self._bridge = bridge or HttpInterviewBridge()
         self._greeting_sent = False
 
     async def on_enter(self) -> None:
@@ -187,7 +188,7 @@ class InterviewAgent(Agent):
         livekit-agents 1.8.1 calls this once from AgentActivity.start (not on
         resume). Built-in workflows use session.generate_reply() so the LLM can
         produce that first utterance. We already have the first-question text
-        from MockInterviewBridge, so we use the canned-text equivalent noted on
+        from Interview Intelligence, so we use the canned-text equivalent noted on
         Agent.on_user_turn_exceeded: session.say(). That still synthesizes through
         tts_node (AgentActivity.say -> _tts_task -> perform_tts_inference).
         """
