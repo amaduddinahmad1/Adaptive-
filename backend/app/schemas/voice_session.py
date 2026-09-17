@@ -45,6 +45,8 @@ class VoiceSessionSchema(VoiceSessionBase):
     connection_status: ConnectionStatus = ConnectionStatus.DISCONNECTED
     current_question_id: Optional[str] = None
     current_question: Optional[str] = None
+    question_turn_budget: Optional[int] = None
+    completed_turns: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -65,10 +67,16 @@ class VoiceSessionStartResponse(BaseModel):
 
 class VoiceSessionAnswerRequest(BaseModel):
     text: str
+    question_text: Optional[str] = None
 
 
 class VoiceSessionNextQuestionResponse(BaseModel):
     question: Optional[str] = None
+    completed: bool = False
+    allow_opening_speech: bool = False
+    action: str = "question"
+    question_turn_budget: Optional[int] = None
+    completed_turns: Optional[int] = None
 
 
 class VoiceSessionEndResponse(BaseModel):

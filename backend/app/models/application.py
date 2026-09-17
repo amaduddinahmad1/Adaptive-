@@ -25,6 +25,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
+HIRING_DECISION_PENDING = "pending"
+HIRING_DECISION_REJECTED = "rejected"
+
+
+def application_is_rejected(application: Optional["Application"]) -> bool:
+    if application is None:
+        return False
+    return (
+        str(getattr(application, "hiring_decision", "") or "").strip().lower()
+        == HIRING_DECISION_REJECTED
+    )
+
 
 class Application(Base):
     __tablename__ = "applications"
@@ -58,6 +70,16 @@ class Application(Base):
     token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     token_used: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Recruiter hiring decision for this application. Independent of
+    # eligibility and of InterviewResult. Rejecting does not delete rows.
+    hiring_decision: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=HIRING_DECISION_PENDING,
+        server_default=HIRING_DECISION_PENDING,
+        index=True,
+    )
 
     candidate: Mapped["Candidate"] = relationship(back_populates="applications")
     job_posting: Mapped["JobPosting"] = relationship(back_populates="applications")

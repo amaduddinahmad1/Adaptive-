@@ -29,6 +29,8 @@ behavior -- so every additional link is strictly opt-in: adding an env var
 is what extends the chain, not a code change.
 """
 import os
+import threading
+from typing import Optional
 
 import grpc
 from google.genai.errors import ServerError
@@ -39,6 +41,10 @@ from app.integrations.llm.fallback_provider import ChainedLLMProvider
 from app.integrations.llm.gemini_provider import GeminiProvider
 from app.integrations.llm.groq_provider import GroqProvider
 from app.integrations.llm.xai_provider import XAIProvider
+
+_provider_lock = threading.Lock()
+_cached_provider: Optional[LLMProvider] = None
+_cached_key: Optional[tuple] = None
 
 
 def _is_gemini_transient_error(err: LLMProviderError) -> bool:
@@ -57,7 +63,16 @@ def _is_groq_transient_error(err: LLMProviderError) -> bool:
     return isinstance(err.__cause__, GroqInternalServerError)
 
 
-def get_default_provider() -> LLMProvider:
+def _provider_cache_key() -> tuple:
+    return (
+        os.getenv("GEMINI_API_KEY"),
+        os.getenv("GEMINI_MODEL"),
+        bool(os.getenv("XAI_API_KEY")),
+        bool(os.getenv("GROQ_API_KEY")),
+    )
+
+
+def _build_default_provider() -> LLMProvider:
     links = [(GeminiProvider(), _is_gemini_transient_error)]
     if os.getenv("XAI_API_KEY"):
         links.append((XAIProvider(), _is_xai_transient_error))
@@ -67,3 +82,29 @@ def get_default_provider() -> LLMProvider:
     if len(links) == 1:
         return links[0][0]
     return ChainedLLMProvider(links)
+
+
+def reset_default_provider_cache_for_tests() -> None:
+    global _cached_provider, _cached_key
+    with _provider_lock:
+        _cached_provider = None
+        _cached_key = None
+
+
+def get_default_provider() -> LLMProvider:
+    """Return the process-cached default LLM provider.
+
+    Answer evaluation used to construct a new GeminiProvider (and later a new
+    genai.Client) on every candidate turn. Reusing the same provider keeps the
+    HTTP client/session warm without sharing it across asyncio event loops —
+    this client is synchronous and used from worker threads.
+    """
+    global _cached_provider, _cached_key
+    key = _provider_cache_key()
+    with _provider_lock:
+        if _cached_provider is not None and _cached_key == key:
+            return _cached_provider
+        provider = _build_default_provider()
+        _cached_provider = provider
+        _cached_key = key
+        return provider

@@ -1,37 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --color-background: #f8f9fc;
-  --color-surface: #ffffff;
-  --color-surface-elevated: #ffffff;
-  --color-sidebar: #0f172a;
-  --color-primary: #4f46e5;
-  --color-primary-hover: #4338ca;
-  --color-success: #059669;
-  --color-warning: #d97706;
-  --color-error: #dc2626;
-  --color-info: #3b82f6;
-  
-  --color-text-primary: #111827;
-  --color-text-secondary: #6b7280;
-  --color-text-muted: #9ca3af;
-  --color-border: #e5e7eb;
-
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-  --spacing-xxl: 48px;
-
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --navy-950: #0b1326;
+  --navy-900: #0f1730;
+  --navy-850: #141c30;
+  --navy-800: #171f33;
+  --navy-750: #1c2540;
+  --navy-700: #232c45;
+  --navy-600: #2a3450;
+  --border: rgba(148, 163, 184, 0.14);
+  --border-strong: rgba(192, 193, 255, 0.22);
+  --lavender-100: #ecebff;
+  --lavender-200: #c0c1ff;
+  --lavender-300: #b4b2ff;
+  --lavender-400: #9b99ff;
+  --lavender-500: #8b8dff;
+  --lavender-600: #6f72e8;
+  --green: #3ddc97;
+  --green-dim: rgba(61, 220, 151, 0.14);
+  --amber: #f5c16c;
+  --amber-dim: rgba(245, 193, 108, 0.14);
+  --red: #f87171;
+  --red-dim: rgba(248, 113, 113, 0.14);
+  --cyan: #5eead4;
+  --info: #7dd3fc;
+  --text: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --sidebar-width: 232px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
   --radius-full: 9999px;
-
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-
-  --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  --shadow-panel: 0 18px 50px rgba(2, 6, 23, 0.35);
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --header-h: 72px;
 }
 
 * {
@@ -40,15 +48,144 @@
   padding: 0;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
-  font-family: var(--font-family);
-  background-color: var(--color-background);
-  color: var(--color-text-primary);
+  font-family: var(--font);
+  background: var(--navy-950);
+  color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
 }
 
 a {
-  color: var(--color-primary);
+  color: var(--lavender-200);
   text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--navy-600);
+  border-radius: 99px;
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100%;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(139, 141, 255, 0.08), transparent 50%),
+    var(--navy-950);
+  color: var(--text);
+}
+
+.app-shell.sidebar-open .sidebar {
+  transform: translateX(0);
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+.main-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.page-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 32px 40px;
+}
+
+.page-kicker {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.page-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.panel {
+  background: var(--navy-800);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.hidden-desktop {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.55);
+    z-index: 30;
+  }
+  .page-scroll {
+    padding: 20px 16px 32px;
+  }
+  .hidden-mobile {
+    display: none !important;
+  }
+  .hidden-desktop {
+    display: inline-flex;
+  }
 }

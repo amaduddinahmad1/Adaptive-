@@ -58,3 +58,9 @@ logs/
 # Misc
 *.bak
 *.tmp
+
+# Local PDF preview artifacts
+.pdf-preview/
+
+# Voice lab / STT-TTS script outputs
+backend/scripts/test_output/

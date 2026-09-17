@@ -19,6 +19,7 @@ export const useLiveKitRoom = () => {
   const sessionRef = useRef(null);
   const remoteAudioRef = useRef(null);
   const [connectionState, setConnectionState] = useState('disconnected');
+  const [disconnectReason, setDisconnectReason] = useState('');
   const [error, setError] = useState(null);
 
   if (sessionRef.current === null) {
@@ -37,7 +38,16 @@ export const useLiveKitRoom = () => {
     remoteAudioRef.current = audioEl;
 
     session.onConnectionStateChange((state) => {
-      setConnectionState(normalizeConnectionState(state));
+      const normalized = normalizeConnectionState(state);
+      setConnectionState(normalized);
+      if (normalized !== 'disconnected') {
+        setDisconnectReason('');
+      }
+    });
+
+    session.onDisconnected((reason) => {
+      setDisconnectReason(reason || '');
+      setConnectionState('disconnected');
     });
 
     session.onRemoteAudioTrack((mediaStreamTrack) => {
@@ -83,10 +93,16 @@ export const useLiveKitRoom = () => {
     await sessionRef.current.disconnect();
   }, []);
 
+  const setMicrophoneEnabled = useCallback(async (enabled) => {
+    await sessionRef.current.setMicrophoneEnabled(enabled);
+  }, []);
+
   return {
     connect,
     disconnect,
+    setMicrophoneEnabled,
     connectionState,
+    disconnectReason,
     remoteAudioRef,
     error,
   };

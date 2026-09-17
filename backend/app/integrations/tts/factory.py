@@ -1,8 +1,10 @@
 """
 Factory for TTS Providers.
 """
+import asyncio
 import logging
 import os
+import threading
 from typing import Dict, Optional, Type
 
 from app.integrations.tts.base import TTSProvider
@@ -30,6 +32,7 @@ class TTSProviderFactory:
         "local_fallback": LocalTTSProvider,
     }
     _instances: Dict[str, TTSProvider] = {}
+    _init_lock = threading.Lock()
 
     @classmethod
     def register_provider(cls, name: str, provider_class: Type[TTSProvider]):
@@ -49,18 +52,31 @@ class TTSProviderFactory:
         cached = cls._instances.get(name)
         if cached is not None:
             return cached
-        provider_class = cls._providers.get(name)
-        if not provider_class:
-            raise ValueError(f"Unknown TTS provider: {provider_name or name}")
-        instance = provider_class()
-        cls._instances[name] = instance
-        return instance
+        with cls._init_lock:
+            cached = cls._instances.get(name)
+            if cached is not None:
+                return cached
+            provider_class = cls._providers.get(name)
+            if not provider_class:
+                raise ValueError(f"Unknown TTS provider: {provider_name or name}")
+            instance = provider_class()
+            cls._instances[name] = instance
+            return instance
+
+    @classmethod
+    async def _aget_provider(cls, provider_name: str) -> TTSProvider:
+        """Return a cached provider, constructing it off the event loop on a cache miss."""
+        name = _canonical_name(provider_name)
+        cached = cls._instances.get(name)
+        if cached is not None:
+            return cached
+        return await asyncio.to_thread(cls.get_provider, provider_name)
 
     @classmethod
     async def synthesize_with_fallback(cls, text: str, config: TTSConfig) -> TTSResult:
         """Synthesize with ElevenLabs, then local MMS-TTS on TTSProviderError."""
         try:
-            primary = cls.get_provider(_PRIMARY_PROVIDER)
+            primary = await cls._aget_provider(_PRIMARY_PROVIDER)
             result = await primary.synthesize(text, config)
             logger.info("TTS request served by provider '%s'", result.provider)
             return result
@@ -72,7 +88,7 @@ class TTSProviderFactory:
                 _FALLBACK_PROVIDER,
             )
             try:
-                fallback = cls.get_provider(_FALLBACK_PROVIDER)
+                fallback = await cls._aget_provider(_FALLBACK_PROVIDER)
                 result = await fallback.synthesize(text, config)
             except Exception as fallback_error:
                 raise TTSProviderError(
@@ -81,6 +97,23 @@ class TTSProviderFactory:
                 ) from fallback_error
             logger.info("TTS request served by provider '%s'", result.provider)
             return result
+
+
+def warmup_blocking_providers() -> None:
+    """Import HTTP/TTS clients before the agent joins a LiveKit room.
+
+    First-use imports of httpcore/httpx and ElevenLabs client construction are
+    synchronous. Doing that inside tts_node / get_next_question blocks the job
+    event loop and can trigger LiveKit signal ping timeouts.
+    Local MMS-TTS is intentionally not loaded here; it remains the on-demand fallback.
+    """
+    import httpcore  # noqa: F401
+    import httpx  # noqa: F401
+
+    try:
+        TTSProviderFactory.get_provider(_PRIMARY_PROVIDER)
+    except Exception:
+        logger.warning("ElevenLabs TTS prewarm skipped", exc_info=True)
 
 
 def _canonical_name(provider_name: str) -> str:

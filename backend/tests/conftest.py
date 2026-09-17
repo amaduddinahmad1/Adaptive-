@@ -9,6 +9,7 @@ from app.integrations.livekit.config import LiveKitConfig
 from app.integrations.livekit.service import LiveKitService
 from app.main import app
 from app.services.voice.service import VoiceInterviewService
+from tests.auth_helpers import AuthenticatedClient, bearer_headers, seed_user
 from tests.db_helpers import create_test_engine, create_test_session, seed_application
 
 
@@ -36,13 +37,28 @@ def db_session(db_engine):
 
 
 @pytest.fixture
-def eligible_application(db_session):
-    return seed_application(db_session, overall_eligible=True)
+def eligible_application(db_session, recruiter_user):
+    return seed_application(
+        db_session,
+        overall_eligible=True,
+        created_by_user_id=recruiter_user.id,
+    )
 
 
 @pytest.fixture
-def ineligible_application(db_session):
-    return seed_application(db_session, overall_eligible=False)
+def ineligible_application(db_session, recruiter_user):
+    return seed_application(
+        db_session,
+        overall_eligible=False,
+        created_by_user_id=recruiter_user.id,
+    )
+
+
+@pytest.fixture(autouse=True)
+def jwt_test_env(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET_KEY", "unit-test-jwt-secret-key-32b-min")
+    monkeypatch.setenv("JWT_ALGORITHM", "HS256")
+    monkeypatch.setenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60")
 
 
 @pytest.fixture
@@ -57,3 +73,18 @@ def client(db_session):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def recruiter_user(db_session):
+    return seed_user(db_session)
+
+
+@pytest.fixture
+def auth_headers(recruiter_user):
+    return bearer_headers(recruiter_user)
+
+
+@pytest.fixture
+def auth_client(client, auth_headers):
+    return AuthenticatedClient(client, auth_headers)

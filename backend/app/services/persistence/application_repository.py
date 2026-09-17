@@ -43,9 +43,17 @@ known to be True.
 import secrets
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
-from app.models.application import Application
+from app.core.interview_config import (
+    DEFAULT_INTERVIEW_QUESTION_COUNT,
+    normalize_interview_question_count,
+)
+from app.models.application import (
+    HIRING_DECISION_PENDING,
+    HIRING_DECISION_REJECTED,
+    Application,
+)
 from app.models.candidate import Candidate
 from app.models.interview_result import InterviewResult
 from app.models.job_posting import JobPosting
@@ -66,6 +74,9 @@ INTERVIEW_TOKEN_TTL_HOURS = 48
 def get_or_create_candidate(db: Session, identity: ApplicantIdentity) -> Candidate:
     existing = db.query(Candidate).filter(Candidate.email == identity.email).first()
     if existing is not None:
+        existing.full_name = identity.full_name
+        if identity.phone is not None:
+            existing.phone = identity.phone
         return existing
 
     candidate = Candidate(
@@ -83,11 +94,17 @@ def create_job_posting(
     job_title: str,
     raw_jd_text: str,
     parsed_profile: JobRequirementProfile,
+    interview_question_count: int = DEFAULT_INTERVIEW_QUESTION_COUNT,
+    created_by_user_id: Optional[int] = None,
 ) -> JobPosting:
     job_posting = JobPosting(
         job_title=job_title,
         raw_jd_text=raw_jd_text,
         parsed_profile=parsed_profile.model_dump(mode="json"),
+        interview_question_count=normalize_interview_question_count(
+            interview_question_count
+        ),
+        created_by_user_id=created_by_user_id,
     )
     db.add(job_posting)
     db.flush()
@@ -115,6 +132,7 @@ def create_application(
         recruiter_salary_max=constraints.salary_max,
         eligibility_result=eligibility_result.model_dump(mode="json"),
         overall_eligible=eligibility_result.overall_eligible,
+        hiring_decision=HIRING_DECISION_PENDING,
     )
     db.add(application)
     db.flush()
@@ -177,7 +195,7 @@ def generate_interview_token(db: Session, application: Application) -> Applicati
         )
 
     if application.interview_token is not None and not application.token_used:
-        if application.token_expires_at and application.token_expires_at > datetime.now(timezone.utc):
+        if application.token_expires_at and not interview_invitation_is_expired(application):
             raise ValueError(
                 f"Application {application.id} already has an active, unexpired interview "
                 "token -- refusing to overwrite it. Regenerating an expired/used token is fine."
@@ -185,6 +203,35 @@ def generate_interview_token(db: Session, application: Application) -> Applicati
 
     application.interview_token = secrets.token_urlsafe(32)
     application.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=INTERVIEW_TOKEN_TTL_HOURS)
+    application.token_used = False
+    db.flush()
+    return application
+
+
+def get_application_by_interview_token(db: Session, token: str) -> Optional[Application]:
+    """Look up an Application by its invitation token. Returns None if missing."""
+    if not token:
+        return None
+    return (
+        db.query(Application)
+        .filter(Application.interview_token == token)
+        .first()
+    )
+
+
+def interview_invitation_is_expired(application: Application) -> bool:
+    """True when a token expiry is present and has already passed."""
+    expires_at = application.token_expires_at
+    if expires_at is None:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at <= datetime.now(timezone.utc)
+
+
+def mark_interview_token_used(db: Session, application: Application) -> Application:
+    """Marks the invitation as consumed when the interview actually starts."""
+    application.token_used = True
     db.flush()
     return application
 
@@ -201,5 +248,24 @@ def mark_invitation_sent(db: Session, application: Application) -> Application:
     "eligible but not yet interviewed" query). Flushes only, caller commits.
     """
     application.email_sent_at = datetime.now(timezone.utc)
+    db.flush()
+    return application
+
+
+def set_application_hiring_decision(
+    db: Session,
+    application: Application,
+    decision: str,
+) -> Application:
+    """Persist a recruiter hiring decision without deleting any records.
+
+    Currently only rejection is supported. Repeating reject is idempotent.
+    """
+    normalized = (decision or "").strip().lower()
+    if normalized != HIRING_DECISION_REJECTED:
+        raise ValueError("Unsupported hiring decision")
+    if application.hiring_decision == HIRING_DECISION_REJECTED:
+        return application
+    application.hiring_decision = HIRING_DECISION_REJECTED
     db.flush()
     return application

@@ -1,4 +1,5 @@
 import { Room, RoomEvent, Track } from 'livekit-client';
+import { normalizeLiveKitDisconnectReason } from '../interview/turnControl';
 
 export class LiveKitSession {
   constructor() {
@@ -25,8 +26,8 @@ export class LiveKitSession {
       this._onConnectionStateChange?.(state);
     });
 
-    this.room.on(RoomEvent.Disconnected, () => {
-      this._onDisconnected?.();
+    this.room.on(RoomEvent.Disconnected, (reason) => {
+      this._onDisconnected?.(normalizeLiveKitDisconnectReason(reason));
     });
   }
 

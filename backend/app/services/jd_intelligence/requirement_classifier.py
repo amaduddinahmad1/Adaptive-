@@ -39,7 +39,8 @@ In both cases: pick the default that costs the least when we're wrong, given
 which direction of error is unknown-but-bounded and which is unknown-and-risky.
 """
 
-from typing import List
+import re
+from typing import List, Optional, Set
 
 from app.schemas.job import (
     ClassifiedRequirement,
@@ -47,6 +48,27 @@ from app.schemas.job import (
     RequirementCategory,
     RequirementType,
 )
+from app.services.eligibility.term_equivalence import (
+    conceptual_alias_keys,
+    is_conceptual_skill_term,
+    normalize_term,
+    skill_aliases,
+)
+
+# Soft learning-attitude phrases are not technical skills. They become OTHER
+# (manual review, non-blocking) rather than mandatory SKILL/TECHNOLOGY gates.
+# Do not broaden this to every soft requirement — only explicit learn-attitude
+# wording, and never strings like "machine learning".
+_WILLINGNESS_TO_LEARN_PATTERN = re.compile(
+    r"(?:willingness|eagerness|ability|able|eager|willing)"
+    r"(?:\s*/\s*(?:willingness|eagerness|ability|able|eager|willing))?"
+    r"\s+to\s+learn",
+    re.IGNORECASE,
+)
+
+
+def is_willingness_to_learn_requirement(text: str) -> bool:
+    return bool(text and _WILLINGNESS_TO_LEARN_PATTERN.search(text.strip()))
 
 
 def _format_education_requirement(degree_level: str, field_of_study: str | None) -> str:
@@ -56,10 +78,24 @@ def _format_education_requirement(degree_level: str, field_of_study: str | None)
     return degree_level
 
 
+def _mandatory_conceptual_aliases(reqs: List[ClassifiedRequirement]) -> Set[str]:
+    aliases: Set[str] = set()
+    for req in reqs:
+        if (
+            req.category == RequirementCategory.MANDATORY
+            and req.requirement_type in (RequirementType.SKILL, RequirementType.TECHNOLOGY)
+            and is_conceptual_skill_term(req.requirement)
+        ):
+            aliases |= skill_aliases(req.requirement)
+    return aliases
+
+
 def _classify_required_preferred_list(
     required: List[str],
     preferred: List[str],
     requirement_type: RequirementType,
+    *,
+    skip_conceptual_aliases: Optional[Set[str]] = None,
 ) -> List[ClassifiedRequirement]:
     """
     Classifies a required_*/preferred_* pair of plain-string lists (skills or
@@ -68,11 +104,32 @@ def _classify_required_preferred_list(
     Conflict resolution: if the same name (case-insensitive) appears in both
     lists, it is emitted once as MANDATORY and the preferred duplicate is
     skipped. See module docstring, point 1, for why mandatory wins.
+
+    Conceptual skill/technology duplicates (Machine Learning / ML / AI/ML,
+    Deep Learning / DL, RAG phrasing) are emitted once as a single mandatory
+    gate. Named tools (Python, PyTorch, PostgreSQL) are not treated as
+    conceptual aliases and may remain in both skills and technologies.
     """
     classified: List[ClassifiedRequirement] = []
+    seen_conceptual = set(skip_conceptual_aliases or ())
+    required_keys = {normalize_term(item) for item in required}
 
-    required_lower = {item.lower() for item in required}
     for item in required:
+        if is_willingness_to_learn_requirement(item):
+            classified.append(
+                ClassifiedRequirement(
+                    requirement=item,
+                    category=RequirementCategory.MANDATORY,
+                    requirement_type=RequirementType.OTHER,
+                )
+            )
+            continue
+
+        keys = conceptual_alias_keys(item)
+        required_keys |= keys
+        if is_conceptual_skill_term(item) and (keys & seen_conceptual):
+            continue
+
         classified.append(
             ClassifiedRequirement(
                 requirement=item,
@@ -80,11 +137,27 @@ def _classify_required_preferred_list(
                 requirement_type=requirement_type,
             )
         )
+        if is_conceptual_skill_term(item):
+            seen_conceptual |= keys
 
     for item in preferred:
-        if item.lower() in required_lower:
+        if is_willingness_to_learn_requirement(item):
+            classified.append(
+                ClassifiedRequirement(
+                    requirement=item,
+                    category=RequirementCategory.PREFERRED,
+                    requirement_type=RequirementType.OTHER,
+                )
+            )
+            continue
+        if normalize_term(item) in {normalize_term(x) for x in required}:
             # Conflict: item is listed as both required and preferred.
             # Mandatory wins — already emitted above, so skip the duplicate.
+            continue
+        keys = conceptual_alias_keys(item)
+        if keys & required_keys:
+            continue
+        if is_conceptual_skill_term(item) and (keys & seen_conceptual):
             continue
         classified.append(
             ClassifiedRequirement(
@@ -123,14 +196,16 @@ def classify_requirements(profile: JobRequirementProfile) -> List[ClassifiedRequ
             )
         )
 
-    classified.extend(
-        _classify_required_preferred_list(
-            profile.required_skills, profile.preferred_skills, RequirementType.SKILL
-        )
+    skill_reqs = _classify_required_preferred_list(
+        profile.required_skills, profile.preferred_skills, RequirementType.SKILL
     )
+    classified.extend(skill_reqs)
     classified.extend(
         _classify_required_preferred_list(
-            profile.required_technologies, profile.preferred_technologies, RequirementType.TECHNOLOGY
+            profile.required_technologies,
+            profile.preferred_technologies,
+            RequirementType.TECHNOLOGY,
+            skip_conceptual_aliases=_mandatory_conceptual_aliases(skill_reqs),
         )
     )
 

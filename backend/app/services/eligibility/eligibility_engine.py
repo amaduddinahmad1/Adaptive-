@@ -59,6 +59,7 @@ from app.services.eligibility.experience_matcher import (
     match_all_experience_requirements,
 )
 from app.services.eligibility.semantic_skill_matcher import judge_unmatched_mandatory_skills
+from app.services.eligibility.term_equivalence import any_alias_matches, skill_aliases
 
 
 class ApplicationDetails(BaseModel):
@@ -227,39 +228,38 @@ def _education_match(degree_level: str, education_entries: List[str]) -> bool:
     return any(_case_insensitive_substring_match(alias, education_entries) for alias in _degree_aliases(degree_level))
 
 
-# Curated skill/technology abbreviation equivalents, mirroring
-# _DEGREE_EQUIVALENCE_GROUPS. Deliberately narrow -- only ML/DL, the two
-# terms actually observed failing exact-match in real pipeline runs -- not
-# padded out with plausible-looking additions (AI, NLP, etc.) that have no
-# observed evidence yet. Add more only when real data shows a real gap, same
-# discipline as the degree table and the date-format fix.
-#
-# This table can ONLY fix a literal synonym/abbreviation mismatch (JD says
-# "ML", candidate says "Machine Learning"). It cannot and is not intended to
-# fix the tool/title-implies-skill case (candidate lists "TensorFlow" but
-# never writes "Machine Learning" or "ML" anywhere) -- that is a domain-
-# knowledge inference, not a synonym relationship, and is handled by the
-# separate, more expensive semantic_skill_matcher layer below, which only
-# runs for whatever this table (and exact matching) still couldn't resolve.
-_SKILL_EQUIVALENCE_GROUPS: List[Set[str]] = [
-    {"machine learning", "ml"},
-    {"deep learning", "dl"},
-]
+def _gather_candidate_evidence_texts(candidate: CandidateProfile) -> List[str]:
+    """
+    Discrete and free-text evidence already present on CandidateProfile.
+
+    Includes skills, technologies, project names/descriptions/technologies,
+    and work-experience descriptions. Job titles/positions are intentionally
+    omitted here: a title alone is not treated as deterministic proof of a
+    skill (that inference belongs to the semantic matcher).
+    """
+    texts: List[str] = []
+    texts.extend(candidate.skills)
+    texts.extend(candidate.technologies)
+    texts.extend(item.technology for item in candidate.technology_specific_experience)
+    for project in candidate.projects:
+        texts.append(project.name)
+        if project.description:
+            texts.append(project.description)
+        texts.extend(project.technologies)
+    for experience in candidate.work_experience:
+        if experience.description:
+            texts.append(experience.description)
+    return [text for text in texts if text and str(text).strip()]
 
 
 def _skill_aliases(term: str) -> Set[str]:
-    """Every phrasing interchangeable with `term`, per _SKILL_EQUIVALENCE_GROUPS, plus the term itself."""
-    normalized = term.strip().lower()
-    aliases = {normalized}
-    for group in _SKILL_EQUIVALENCE_GROUPS:
-        if normalized in group:
-            aliases |= group
-    return aliases
+    """Compatibility wrapper around term_equivalence.skill_aliases."""
+    return skill_aliases(term)
 
 
-def _skill_alias_match(requirement_text: str, candidate_terms: List[str]) -> bool:
-    """Exact match after normalization, expanded across curated skill-abbreviation equivalents (e.g. "ML" <-> "Machine Learning")."""
-    return any(_case_insensitive_exact_match(alias, candidate_terms) for alias in _skill_aliases(requirement_text))
+def _skill_alias_match(requirement_text: str, evidence_texts: List[str]) -> bool:
+    """Normalized alias match against gathered candidate evidence (not unsafe substrings)."""
+    return any_alias_matches(requirement_text, evidence_texts)
 
 
 def _match_classified_requirement(requirement: ClassifiedRequirement, candidate: CandidateProfile) -> MatchStatus:
@@ -271,18 +271,18 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     _match_all_classified_requirements, which may still escalate it to the
     semantic_skill_matcher layer.
 
-    SKILL and TECHNOLOGY requirements are both checked against the combined
-    set of candidate.skills + candidate.technologies, not just the matching
-    field. JD parsing and CV parsing are two independent LLM extractions
-    with no shared vocabulary enforcement between them, so they don't
-    reliably agree on which field a given term belongs in — e.g. "Python"
-    filed as a skill by one and a technology by the other. Confirmed
-    happening on real (non-test) data during the first full pipeline E2E
-    run; see LIMITATIONS.md. This mirrors the same real-vocabulary-mismatch
-    reasoning as experience_matcher._lookup_technology_years. On top of exact
-    matching, _skill_alias_match additionally covers curated abbreviation
-    equivalents (e.g. "ML" <-> "Machine Learning") — see
-    _SKILL_EQUIVALENCE_GROUPS for what this can and can't fix.
+    SKILL and TECHNOLOGY requirements are checked against gathered candidate
+    evidence: skills, technologies, project names/descriptions/technologies,
+    and work-experience descriptions. JD parsing and CV parsing are two
+    independent LLM extractions with no shared vocabulary enforcement, so
+    they don't reliably agree on which field a given term belongs in — e.g.
+    "Python" filed as a skill by one and a technology by the other, or "RAG"
+    appearing only in a project name. On top of exact matching,
+    _skill_alias_match covers curated abbreviation equivalents (e.g. "AI/ML"
+    <-> "Machine Learning", "DL" <-> "Deep Learning", "RAG" <->
+    "RAG (Retrieval-Augmented Generation)") using alphanumeric-boundary
+    matching rather than unsafe substrings. Tool/title-implies-skill
+    inferences remain in the semantic_skill_matcher layer.
 
     EDUCATION requirements match the degree_level through _education_match,
     which additionally covers curated degree-abbreviation equivalents (e.g.
@@ -300,10 +300,10 @@ def _match_classified_requirement(requirement: ClassifiedRequirement, candidate:
     status) surfaces immediately rather than silently misclassifying.
     """
     if requirement.requirement_type in (RequirementType.SKILL, RequirementType.TECHNOLOGY):
-        candidate_terms = candidate.skills + candidate.technologies
-        found = _case_insensitive_exact_match(requirement.requirement, candidate_terms) or _skill_alias_match(
-            requirement.requirement, candidate_terms
-        )
+        evidence_texts = _gather_candidate_evidence_texts(candidate)
+        found = _case_insensitive_exact_match(
+            requirement.requirement, evidence_texts
+        ) or _skill_alias_match(requirement.requirement, evidence_texts)
     elif requirement.requirement_type == RequirementType.CERTIFICATION:
         found = _case_insensitive_substring_match(requirement.requirement, candidate.certifications)
     elif requirement.requirement_type == RequirementType.EDUCATION:
@@ -330,15 +330,13 @@ def _match_all_classified_requirements(
     matching to the semantic_skill_matcher layer, in a single batched call.
 
     The semantic layer is strictly opt-in via `provider`, deliberately not
-    defaulted to get_default_provider(): check_eligibility() (and therefore
-    this function) is called by many existing tests that deliberately set up
-    a mandatory skill/technology mismatch as their whole premise, none of
-    which pass a provider. Defaulting this to an always-on real provider
-    would turn every one of those into a real, uncontrolled network call the
-    moment this feature shipped -- so `provider=None` means exactly today's
-    pre-existing behavior, byte-for-byte unchanged, and a caller must
-    explicitly opt in (e.g. scripts/run_pipeline_smoketest.py passes
-    get_default_provider()) to exercise the new capability at all.
+    defaulted to get_default_provider() inside this function: unit tests that
+    set up a mandatory skill/technology mismatch as their premise omit
+    provider and stay deterministic. Production candidate paths
+    (apply_to_job, pipeline check-eligibility / submit-application) pass
+    get_default_provider() explicitly so unmatched mandatory SKILL/TECHNOLOGY
+    requirements can be judged. `provider=None` remains byte-for-byte the
+    deterministic path.
 
     A requirement that reaches the semantic layer but is missing from its
     result (provider/parse failure, or the model simply omitted it) becomes
@@ -453,6 +451,8 @@ def check_eligibility(
     additionally allows mandatory SKILL/TECHNOLOGY requirements that survive
     exact and alias matching to be escalated to an LLM judgment call — see
     _match_all_classified_requirements and semantic_skill_matcher.py.
+    Production apply and pipeline routes pass get_default_provider(); unit
+    tests that omit provider stay deterministic.
     """
     experience_matches = match_all_experience_requirements(jd_profile, candidate, today=today)
     assert len(experience_matches) == len(jd_profile.experience_requirements), (

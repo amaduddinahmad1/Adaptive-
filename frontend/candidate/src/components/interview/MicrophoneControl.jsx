@@ -15,10 +15,10 @@ const MicrophoneControl = ({ state, onClick }) => {
 
   const getLabel = () => {
     switch(state) {
-      case MIC_STATE.LISTENING: return 'Listening...';
+      case MIC_STATE.LISTENING: return 'Microphone on';
       case MIC_STATE.PROCESSING: return 'Processing...';
-      case MIC_STATE.MUTED: return 'Muted';
-      default: return 'Tap to speak';
+      case MIC_STATE.MUTED: return 'Muted — tap to unmute';
+      default: return 'Microphone ready';
     }
   };
 

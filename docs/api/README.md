@@ -1,14 +1,41 @@
 # API Documentation
 
-> **Status**: Day 1 — Voice session endpoints defined (foundation only).
+Interactive OpenAPI is served by FastAPI when the backend is running:
 
-## Base URL
+```
+http://localhost:8000/docs
+```
+
+Base path for versioned product routes:
 
 ```
 http://localhost:8000/api/v1
 ```
 
-## Voice Session Endpoints
+Health:
+
+```
+GET http://localhost:8000/health
+```
+
+## Current routers
+
+These are the routers mounted in `backend/app/main.py`. Request/response fields are defined by the FastAPI/Pydantic models; use `/docs` as the source of truth.
+
+| Prefix | Module | Purpose |
+|--------|--------|---------|
+| `/api/v1/jobs`, `/api/v1/jobs/{job_id}/apply`, `/api/v1/interview-invitations/resolve` | `app.api.routes.apply` | Public jobs list, candidate apply, invitation resolve |
+| `/api/v1/voice/...` | `app.api.routes.voice` | Voice session create/start/end/status, next-question, candidate response |
+| `/api/v1/dashboard/...` | `app.api.routes.dashboard` | Recruiter candidates, jobs, applications, interview results |
+| `/analyze-jd`, `/analyze-cv`, `/match-experience`, `/check-eligibility`, `/submit-application` | `app.api.routes.pipeline` | Standalone JD/CV/eligibility helpers (recruiter job preview uses `/analyze-jd`) |
+
+Error bodies use FastAPI's `{"detail": "..."}` shape. Invitation resolve never returns the raw token. Unhandled server errors return a generic detail string and do not include stack traces.
+
+## Historical Day 1 notes
+
+The voice session examples below remain valid for the voice router. Later product routes (apply, dashboard, invitation resolve) are not listed in the original Day 1 examples; use `/docs`.
+
+## Voice session endpoints
 
 ### Create Voice Session
 
@@ -19,25 +46,12 @@ POST /api/v1/voice/sessions
 **Request Body:**
 ```json
 {
-  "candidate_id": "string",
-  "job_id": "string",
+  "application_id": 1,
   "language": "en"
 }
 ```
 
-**Response:**
-```json
-{
-  "session_id": "uuid",
-  "candidate_id": "string",
-  "job_id": "string",
-  "interview_status": "PENDING",
-  "connection_status": "DISCONNECTED",
-  "language": "en",
-  "created_at": "datetime",
-  "updated_at": "datetime"
-}
-```
+The session is bound to an existing eligible `Application`.
 
 ---
 
@@ -47,8 +61,6 @@ POST /api/v1/voice/sessions
 GET /api/v1/voice/sessions/{session_id}
 ```
 
-**Response:** Same schema as creation response.
-
 ---
 
 ### Start Interview
@@ -57,14 +69,7 @@ GET /api/v1/voice/sessions/{session_id}
 POST /api/v1/voice/sessions/{session_id}/start
 ```
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "session_id": "uuid",
-  "message": "Interview started"
-}
-```
+Returns LiveKit join fields (`livekit_url`, `token`, `room_name`, `identity`) when credentials are configured.
 
 ---
 
@@ -74,14 +79,7 @@ POST /api/v1/voice/sessions/{session_id}/start
 POST /api/v1/voice/sessions/{session_id}/end
 ```
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "session_id": "uuid",
-  "message": "Interview ended"
-}
-```
+Persists a real `InterviewResult` when genuine answer evaluations exist.
 
 ---
 
@@ -91,56 +89,18 @@ POST /api/v1/voice/sessions/{session_id}/end
 GET /api/v1/voice/sessions/{session_id}/status
 ```
 
-**Response:**
-```json
-{
-  "session_id": "uuid",
-  "interview_status": "IN_PROGRESS",
-  "connection_status": "CONNECTED",
-  "current_question_id": "string | null",
-  "current_question": "string | null"
-}
+### Next question / candidate response
+
+Used by the LiveKit worker (`HttpInterviewBridge`):
+
+```
+GET  /api/v1/voice/sessions/{session_id}/next-question
+POST /api/v1/voice/sessions/{session_id}/response
 ```
 
-## Planned Endpoints (Not Yet Implemented)
+## API design notes
 
-### Job Description Endpoints (Amad)
-- `POST /api/v1/jobs` — Create job with description
-- `GET /api/v1/jobs` — List jobs
-- `GET /api/v1/jobs/{job_id}` — Get job details
-- `GET /api/v1/jobs/{job_id}/requirements` — Get requirement profile
-
-### Candidate Endpoints (Amad)
-- `POST /api/v1/candidates` — Register candidate
-- `POST /api/v1/candidates/{id}/cv` — Upload CV
-- `GET /api/v1/candidates/{id}/profile` — Get parsed profile
-- `POST /api/v1/candidates/{id}/eligibility` — Check eligibility
-
-### Interview Intelligence Endpoints (Faizan)
-- `POST /api/v1/interviews/{session_id}/evaluate` — Evaluate answer
-- `GET /api/v1/interviews/{session_id}/next-question` — Get next question
-- `GET /api/v1/interviews/{session_id}/plan` — Get interview plan
-
-### Assessment Endpoints (Faizan)
-- `GET /api/v1/assessments/{session_id}` — Get assessment report
-- `GET /api/v1/assessments/{session_id}/scores` — Get skill scores
-- `GET /api/v1/assessments/{session_id}/gaps` — Get gap analysis
-
-### LiveKit Token Endpoints (Jazib)
-- `POST /api/v1/voice/token` — Generate LiveKit room token
-
-## API Design Principles
-
-- RESTful conventions with consistent naming
 - JSON request/response bodies
-- Versioned endpoints (`/api/v1/`)
-- Consistent error response format:
-  ```json
-  {
-    "error": "error_code",
-    "message": "Human-readable message",
-    "details": {}
-  }
-  ```
-- Authentication: TBD (JWT planned)
-- Rate limiting: TBD
+- Versioned product endpoints under `/api/v1/`
+- No authentication layer in the current demo
+- Recruiter and candidate UIs proxy or call `http://localhost:8000`

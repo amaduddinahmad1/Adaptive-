@@ -45,8 +45,8 @@ const InstructionsPage = ({ onStart }) => {
                 <ul className="flex list-disc flex-col gap-2 pl-5 text-sm leading-relaxed text-text-muted">
                   <li>You will be speaking with our AI interviewer.</li>
                   <li>Ensure you are in a quiet room with a stable internet connection.</li>
-                  <li>Read the question carefully and press the microphone button to start answering.</li>
-                  <li>Speak clearly. The AI will process your response and move to the next question.</li>
+                  <li>After you start, your microphone stays on. Wait for the interviewer to finish, then answer naturally — you do not need to tap the microphone for each question.</li>
+                  <li>Speak clearly. The interviewer will detect when you have finished and continue automatically. Use mute only if you need to, and End Interview when you want to stop.</li>
                 </ul>
               </Card>
 

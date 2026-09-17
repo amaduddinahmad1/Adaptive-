@@ -16,10 +16,12 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.interview_config import DEFAULT_INTERVIEW_QUESTION_COUNT
 from app.db.base import Base
-from app.models.application import Application
+from app.models.application import HIRING_DECISION_PENDING, Application
 from app.models.candidate import Candidate
 from app.models.job_posting import JobPosting
+from app.models.user import ROLE_RECRUITER, User
 from app.schemas.candidate import CandidateProfile
 from app.schemas.job import JobRequirementProfile
 import app.models  # noqa: F401  — populate Base.metadata
@@ -89,13 +91,33 @@ def create_test_session(engine: Engine) -> Session:
     return factory()
 
 
+_CREATED_BY_UNSET = object()
+
+
 def seed_application(
     db: Session,
     *,
     overall_eligible: bool = True,
     email: str | None = None,
+    interview_question_count: int = DEFAULT_INTERVIEW_QUESTION_COUNT,
+    hiring_decision: str = HIRING_DECISION_PENDING,
+    created_by_user_id=_CREATED_BY_UNSET,
 ) -> Application:
-    """Insert a real Candidate, JobPosting, and Application; IDs come from the DB."""
+    """Insert a real Candidate, JobPosting, and Application; IDs come from the DB.
+
+    If created_by_user_id is omitted, the job is assigned to the first recruiter
+    already present in the session (if any). Pass None to leave the job unowned.
+    """
+    owner_id = created_by_user_id
+    if owner_id is _CREATED_BY_UNSET:
+        owner = (
+            db.query(User)
+            .filter(User.role == ROLE_RECRUITER)
+            .order_by(User.id.asc())
+            .first()
+        )
+        owner_id = owner.id if owner is not None else None
+
     candidate = Candidate(
         full_name="Test Candidate",
         email=email or f"candidate-{uuid4().hex}@example.com",
@@ -104,6 +126,8 @@ def seed_application(
         job_title="Backend Engineer",
         raw_jd_text="Build and maintain backend services with Python, FastAPI, and PostgreSQL.",
         parsed_profile=SAMPLE_JOB_PROFILE,
+        interview_question_count=interview_question_count,
+        created_by_user_id=owner_id,
     )
     db.add_all([candidate, job_posting])
     db.flush()
@@ -117,6 +141,8 @@ def seed_application(
         salary_expectation=Decimal("120000"),
         eligibility_result={"overall_eligible": overall_eligible},
         overall_eligible=overall_eligible,
+        token_used=False,
+        hiring_decision=hiring_decision,
     )
     db.add(application)
     db.commit()

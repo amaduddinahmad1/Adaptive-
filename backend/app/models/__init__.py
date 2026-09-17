@@ -9,5 +9,14 @@ from app.models.candidate import Candidate
 from app.models.job_posting import JobPosting
 from app.models.application import Application
 from app.models.interview_result import InterviewResult
+from app.models.user import User
+from app.models.password_reset_token import PasswordResetToken
 
-__all__ = ["Candidate", "JobPosting", "Application", "InterviewResult"]
+__all__ = [
+    "Candidate",
+    "JobPosting",
+    "Application",
+    "InterviewResult",
+    "User",
+    "PasswordResetToken",
+]

@@ -1,4 +1,10 @@
-import './SkillIndicator.css';
-export default function SkillIndicator() {
-  return <div>SkillIndicator Component</div>;
+export default function SkillIndicator({ label, value }) {
+  return (
+    <div className="skill-bar">
+      <div className="skill-bar-label">
+        <span>{label}</span>
+        <strong>{value ?? '—'}</strong>
+      </div>
+    </div>
+  );
 }

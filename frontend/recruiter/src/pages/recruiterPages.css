@@ -1,0 +1,283 @@
+.page { display: flex; flex-direction: column; gap: 22px; }
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.metric-grid.mini { grid-template-columns: repeat(4, minmax(0, 1fr)); flex: 1; }
+.metric-card.mini { min-height: 84px; padding: 12px 14px; }
+.metric-value.small { font-size: 22px; margin-top: 8px; }
+
+.split-2 {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+}
+.stack { display: grid; gap: 16px; }
+.stack-list { display: grid; gap: 8px; }
+.stack-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  color: inherit;
+}
+.stack-row:hover { background: rgba(255,255,255,0.03); }
+.stack-row small { display: block; color: var(--text-muted); font-size: 12px; }
+.stack-row .badge { margin-left: auto; }
+
+.table-panel { padding: 16px; }
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 180px 180px;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.search-field,
+.filters select,
+.inline-search {
+  background: #0e1629;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--text);
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--text-muted);
+}
+.search-field input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 11px 0;
+  outline: none;
+}
+.search-field input,
+.filters select,
+.inline-search,
+.top-search input,
+.eval-block-head input {
+  color-scheme: dark;
+}
+.filters select { padding: 10px 12px; }
+.inline-search { padding: 8px 10px; font-size: 12px; }
+.table-foot {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.crumb {
+  display: flex;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.crumb a { color: var(--text-secondary); }
+.detail-hero,
+.assess-hero {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.hero-chips, .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.hero-actions { margin-left: auto; }
+.avatar.xl {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #334155, #1e293b);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  gap: 16px;
+}
+.detail-main, .detail-side, .stack { display: grid; gap: 16px; align-content: start; }
+.data-table.compact td, .data-table.compact th { padding: 10px 8px; }
+.summary-block { margin-top: 14px; }
+.summary-block ul, .gap-cols ul { padding-left: 16px; font-size: 13px; color: var(--text-secondary); }
+.summary-block.concern { color: var(--amber); }
+.soft-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.soft-grid div {
+  background: #0e1629;
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.soft-grid strong { display: block; font-size: 22px; }
+.soft-grid span { font-size: 11px; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.tiny { font-size: 12px; margin-top: 10px; }
+.transcript-turn.spaced { margin-bottom: 10px; }
+
+.jobs-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
+}
+.jobs-list { padding: 16px; display: grid; gap: 10px; align-content: start; }
+.jobs-list-head { display: flex; justify-content: space-between; align-items: center; }
+.job-card {
+  text-align: left;
+  background: #10182c;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  color: inherit;
+  display: grid;
+  gap: 6px;
+}
+.job-card.active { border-color: var(--lavender-400); background: rgba(192, 193, 255, 0.06); }
+.job-card small { color: var(--text-muted); }
+.job-card-meta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-secondary); }
+.jobs-detail { display: grid; gap: 16px; }
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.control.readonly { min-height: 42px; display: flex; align-items: center; }
+.rule-list { display: grid; gap: 8px; margin: 10px 0 16px; }
+.rule-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: #0e1629;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.chip-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.chip {
+  border: 1px solid var(--border-strong);
+  color: var(--lavender-200);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.jd-preview {
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.create-job-sheet { padding: 22px; }
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 280px;
+  gap: 14px;
+}
+.live-left, .live-right { display: grid; gap: 12px; align-content: start; }
+.live-stage {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px;
+  background: #0c1428;
+}
+.live-stage-top { display: flex; gap: 8px; align-self: stretch; justify-content: flex-end; }
+.orb {
+  width: 180px;
+  height: 180px;
+  margin: 48px 0 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #fff, #5eead4 28%, #2563eb 62%, #020617 78%);
+  box-shadow: 0 0 80px rgba(94, 234, 212, 0.25);
+  animation: pulse 3s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% { transform: scale(1.04); filter: brightness(1.1); }
+}
+.current-q {
+  background: #10182c;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  width: 100%;
+}
+.live-controls { display: flex; gap: 8px; margin-top: 16px; }
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 0.9fr;
+  gap: 16px;
+}
+.funnel {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  align-items: end;
+  min-height: 240px;
+}
+.funnel-col { text-align: center; display: grid; gap: 8px; justify-items: center; }
+.funnel-bar {
+  width: 52px;
+  border-radius: 10px 10px 4px 4px;
+  background: linear-gradient(180deg, rgba(148,163,184,0.2), rgba(148,163,184,0.05));
+}
+.funnel-bar.green { background: linear-gradient(180deg, rgba(61,220,151,0.7), rgba(61,220,151,0.12)); }
+.funnel-bar.lavender { background: linear-gradient(180deg, rgba(192,193,255,0.8), rgba(192,193,255,0.12)); }
+.funnel-col.empty .funnel-bar { height: 24px; opacity: 0.4; }
+.funnel-col strong { font-size: 18px; }
+.funnel-col span, .funnel-col small { color: var(--text-muted); font-size: 12px; }
+.heat { display: grid; gap: 8px; }
+.heat-row { display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center; font-size: 12px; }
+.heat-cells { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.heat-cells i {
+  display: block;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--lavender-400);
+}
+.live-pill {
+  border: 1px solid rgba(61, 220, 151, 0.3);
+  color: var(--green);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.kv { display: grid; gap: 12px; }
+.kv div { display: grid; gap: 4px; }
+.kv dt { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; }
+.gap-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+@media (max-width: 1100px) {
+  .metric-grid, .metric-grid.mini, .live-grid, .jobs-layout, .detail-layout, .split-2, .analytics-grid, .form-grid, .chip-cols, .gap-cols {
+    grid-template-columns: 1fr;
+  }
+  .filters { grid-template-columns: 1fr; }
+}
+@media print {
+  .sidebar, .topbar, .decision-bar, .hero-actions { display: none !important; }
+  .app-shell, .page-scroll { background: #fff; color: #111; }
+}

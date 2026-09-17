@@ -3,15 +3,16 @@ Voice Interview Service.
 """
 import uuid
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.application import Application
+from app.models.application import Application, application_is_rejected
 from app.models.interview_result import InterviewResult
 from app.schemas.voice_session import VoiceSessionSchema, InterviewStatus, ConnectionStatus
 from app.core.config import settings
+from app.core.interview_config import normalize_interview_question_count
 from app.integrations.livekit.config import LiveKitConfig
 from app.integrations.livekit.service import LiveKitService
 from app.integrations.stt.factory import STTProviderFactory
@@ -21,6 +22,11 @@ from app.services.persistence.application_repository import create_interview_res
 from .session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
+
+_REJECTED_APPLICATION_MESSAGE = (
+    "This application has been rejected and cannot start a new interview."
+)
+
 
 class VoiceInterviewService:
     def __init__(self, livekit_service: Optional[LiveKitService] = None):
@@ -37,12 +43,16 @@ class VoiceInterviewService:
         )
 
     def _store_application_context(self, session_id: str, application: Application) -> None:
+        job_posting = getattr(application, "job_posting", None)
         self._application_context[session_id] = {
             "application_id": application.id,
             "candidate_id": application.candidate_id,
             "job_posting_id": application.job_posting_id,
             "candidate_profile": application.candidate_profile,
             "job_profile_snapshot": application.job_profile_snapshot,
+            "interview_question_count": normalize_interview_question_count(
+                getattr(job_posting, "interview_question_count", None)
+            ),
         }
 
     def _initialize_interview_intelligence(
@@ -55,12 +65,31 @@ class VoiceInterviewService:
             raise ValueError("Session is not linked to an application")
         self.bridge.initialize(session_id, **context)
 
+    def _sync_runtime_session_fields(self, session_id: str) -> None:
+        session = self.session_manager.get_session(session_id)
+        runtime = self.bridge.get_runtime(session_id)
+        if session is None or runtime is None:
+            return
+        session.question_turn_budget = runtime.question_turn_budget
+        session.completed_turns = runtime.completed_turns
+
+    def _mark_runtime_terminated(self, session_id: str) -> None:
+        marker = getattr(self.bridge, "mark_terminated", None)
+        if callable(marker):
+            marker(session_id)
+        else:
+            runtime = self.bridge.get_runtime(session_id)
+            if runtime is not None:
+                runtime.terminated = True
+
     async def create_session(
         self, application: Application, language: str = "en"
     ) -> VoiceSessionSchema:
         """Create an in-memory voice session bound to a validated Application."""
         if application.overall_eligible is False:
             raise ValueError("Application is not eligible for interview")
+        if application_is_rejected(application):
+            raise ValueError(_REJECTED_APPLICATION_MESSAGE)
 
         session_id = str(uuid.uuid4())
         session = VoiceSessionSchema(
@@ -88,10 +117,18 @@ class VoiceInterviewService:
             raise ValueError("Session is not linked to an application")
         if application is not None and application.id != session.application_id:
             raise ValueError("Application does not match this session")
+        if session.interview_status == InterviewStatus.COMPLETED:
+            raise ValueError("Interview session already ended")
+        if (
+            application_is_rejected(application)
+            and session.interview_status != InterviewStatus.IN_PROGRESS
+        ):
+            raise ValueError(_REJECTED_APPLICATION_MESSAGE)
 
         self._initialize_interview_intelligence(session_id, application)
         first_question = await self.bridge.get_next_question(session_id)
         session.current_question = first_question
+        self._sync_runtime_session_fields(session_id)
 
         stt_provider = STTProviderFactory.get_provider()
 
@@ -137,6 +174,11 @@ class VoiceInterviewService:
         if not session:
             raise ValueError("Session not found")
 
+        self._mark_runtime_terminated(session_id)
+        session.interview_status = InterviewStatus.COMPLETED
+        session.connection_status = ConnectionStatus.DISCONNECTED
+        self._sync_runtime_session_fields(session_id)
+
         pipeline = self.pipelines.get(session_id)
         if pipeline:
             await pipeline.stop()
@@ -151,8 +193,8 @@ class VoiceInterviewService:
                 exc_info=True,
             )
 
-        session.interview_status = InterviewStatus.COMPLETED
-        session.connection_status = ConnectionStatus.DISCONNECTED
+        if hasattr(self.bridge, "release_session_lock"):
+            self.bridge.release_session_lock(session_id)
         logger.info(f"Ended interview for session {session_id}")
 
         persistence = self._persist_completion(session_id, db)
@@ -289,6 +331,10 @@ class VoiceInterviewService:
         """Get session details."""
         return self.session_manager.get_session(session_id)
 
+    async def list_sessions(self) -> List[VoiceSessionSchema]:
+        """Return in-memory voice sessions for recruiter monitoring."""
+        return self.session_manager.list_sessions()
+
     async def get_next_question(self, session_id: str) -> Optional[str]:
         """Return the current or next Question Engine question for a live session."""
         session = self.session_manager.get_session(session_id)
@@ -296,19 +342,45 @@ class VoiceInterviewService:
             raise ValueError("Session not found")
         question = await self.bridge.get_next_question(session_id)
         session.current_question = question
+        self._sync_runtime_session_fields(session_id)
         return question
 
+    async def claim_agent_opening(
+        self, session_id: str, owner_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        session = self.session_manager.get_session(session_id)
+        if not session:
+            raise ValueError("Session not found")
+        result = await self.bridge.claim_opening(session_id, owner_id)
+        session.current_question = result.get("question")
+        self._sync_runtime_session_fields(session_id)
+        result["question_turn_budget"] = session.question_turn_budget
+        result["completed_turns"] = session.completed_turns
+        return result
+
     async def process_candidate_response(
-        self, session_id: str, text: str
+        self,
+        session_id: str,
+        text: str,
+        question_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate a candidate answer with the real assessment path and advance."""
         session = self.session_manager.get_session(session_id)
         if not session:
             raise ValueError("Session not found")
-        result = await self.bridge.process_candidate_response(text, session_id)
-        next_question = await self.bridge.get_next_question(session_id)
+        result = await self.bridge.process_candidate_response(
+            text, session_id, question_text=question_text
+        )
+        if "next_question" in result:
+            next_question = result.get("next_question")
+        else:
+            next_question = await self.bridge.get_next_question(session_id)
+            result["next_question"] = next_question
         session.current_question = next_question
         result["next_question"] = next_question
+        self._sync_runtime_session_fields(session_id)
+        result["question_turn_budget"] = session.question_turn_budget
+        result["completed_turns"] = session.completed_turns
         return result
 
     async def process_audio_chunk(self, session_id: str, audio_data: bytes) -> Optional[Dict[str, Any]]:

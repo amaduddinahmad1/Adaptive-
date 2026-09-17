@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import threading
 import time
 import wave
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
 
 from app.integrations.tts.base import TTSProvider, TTSProviderError
@@ -19,6 +21,8 @@ from app.schemas.tts import TTSConfig, TTSResult
 
 _MODEL_ID = "eleven_multilingual_v2"
 _DEFAULT_PCM_RATE = 16000
+# 3 = max latency optimizations while keeping text normalization (not 4).
+_OPTIMIZE_STREAMING_LATENCY = 3
 
 
 class ElevenLabsTTSProvider(TTSProvider):
@@ -88,19 +92,67 @@ class ElevenLabsTTSProvider(TTSProvider):
             },
         )
 
+    def _convert_iter(self, text: str, voice_id: str, output_format: str) -> Iterator[bytes]:
+        return self._client.text_to_speech.convert(
+            text=text,
+            voice_id=voice_id,
+            model_id=_MODEL_ID,
+            output_format=output_format,
+            optimize_streaming_latency=_OPTIMIZE_STREAMING_LATENCY,
+        )
+
     def _convert(self, text: str, voice_id: str, output_format: str) -> bytes:
         try:
-            audio = self._client.text_to_speech.convert(
-                text=text,
-                voice_id=voice_id,
-                model_id=_MODEL_ID,
-                output_format=output_format,
-            )
-            return _collect_audio_bytes(audio)
+            return _collect_audio_bytes(self._convert_iter(text, voice_id, output_format))
         except TTSProviderError:
             raise
         except Exception as exc:
             raise TTSProviderError(_format_api_failure(exc)) from exc
+
+    async def synthesize_pcm_stream(
+        self, text: str, config: TTSConfig
+    ) -> AsyncIterator[bytes]:
+        """Yield PCM chunks as ElevenLabs produces them so playback can start earlier."""
+        voice_id = (config.voice_id or "").strip() or self._voice_id
+        eleven_format, _sample_rate, wrap_wav = _map_output_format(config.output_format)
+        if wrap_wav or not str(eleven_format).startswith("pcm_"):
+            result = await self.synthesize(text, config)
+            data = result.audio_data or b""
+            if data.startswith(b"RIFF"):
+                with wave.open(io.BytesIO(data), "rb") as wav_file:
+                    data = wav_file.readframes(wav_file.getnframes())
+            if data:
+                yield data
+            return
+
+        queue: asyncio.Queue[bytes | None | Exception] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _produce() -> None:
+            try:
+                for chunk in self._convert_iter(text, voice_id, eleven_format):
+                    if chunk:
+                        loop.call_soon_threadsafe(queue.put_nowait, bytes(chunk))
+            except Exception as exc:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    TTSProviderError(_format_api_failure(exc)),
+                )
+                return
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        worker = threading.Thread(target=_produce, daemon=True, name="elevenlabs-tts-stream")
+        worker.start()
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            worker.join(timeout=1.0)
 
     def get_supported_languages(self) -> list[str]:
         return ["en"]

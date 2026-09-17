@@ -1,28 +1,19 @@
-import React, { useState } from 'react';
-import InstructionsPage from './pages/InstructionsPage';
-import InterviewPage from './pages/InterviewPage';
-import InterviewCompletedPage from './pages/InterviewCompletedPage';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import ApplyPage from './pages/ApplyPage';
+import InterviewFlow from './pages/InterviewFlow';
 import './App.css';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('instructions'); // instructions, interview, completed
-
-  const navigateTo = (page) => {
-    setCurrentPage(page);
-  };
-
   return (
-    <div className="app-container">
-      {currentPage === 'instructions' && (
-        <InstructionsPage onStart={() => navigateTo('interview')} />
-      )}
-      {currentPage === 'interview' && (
-        <InterviewPage onComplete={() => navigateTo('completed')} />
-      )}
-      {currentPage === 'completed' && (
-        <InterviewCompletedPage />
-      )}
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<ApplyPage />} />
+        <Route path="/apply" element={<ApplyPage />} />
+        <Route path="/apply/:jobId" element={<ApplyPage />} />
+        <Route path="/interview" element={<InterviewFlow />} />
+        <Route path="/interview/:token" element={<InterviewFlow />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

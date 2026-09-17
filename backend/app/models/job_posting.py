@@ -12,10 +12,11 @@ time, for audit immutability if this posting is ever edited later.
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.interview_config import DEFAULT_INTERVIEW_QUESTION_COUNT
 from app.db.base import Base
 
 
@@ -26,6 +27,22 @@ class JobPosting(Base):
     job_title: Mapped[str] = mapped_column(String, nullable=False)
     raw_jd_text: Mapped[str] = mapped_column(Text, nullable=False)
     parsed_profile: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Recruiter-configured interview question budget. Existing rows are
+    # backfilled to DEFAULT_INTERVIEW_QUESTION_COUNT by migration.
+    interview_question_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=DEFAULT_INTERVIEW_QUESTION_COUNT,
+        server_default=str(DEFAULT_INTERVIEW_QUESTION_COUNT),
+    )
+    # Recruiter who created this posting. Nullable so pre-auth / legacy rows
+    # can exist; recruiter APIs only return rows owned by the current user.
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     applications: Mapped[List["Application"]] = relationship(back_populates="job_posting")
+    created_by: Mapped[Optional["User"]] = relationship()

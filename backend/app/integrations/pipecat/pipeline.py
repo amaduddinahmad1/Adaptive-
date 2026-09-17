@@ -90,7 +90,18 @@ class InterviewPipeline:
     async def _next_ai_utterance(self, transcript: str) -> Optional[str]:
         if self.bridge is None or self.session_id is None:
             return None
-        await self.bridge.process_candidate_response(transcript, self.session_id)
+        result = await self.bridge.process_candidate_response(transcript, self.session_id)
+        if isinstance(result, dict):
+            spoken_reply = (result.get("spoken_reply") or "").strip()
+            if spoken_reply:
+                return spoken_reply
+            if result.get("status") == "ignored":
+                return None
+            next_question = result.get("next_question")
+            if next_question:
+                return str(next_question).strip()
+            if result.get("completed"):
+                return None
         reply = await self.bridge.get_next_question(self.session_id)
         if reply is None:
             return None

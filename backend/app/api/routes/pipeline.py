@@ -34,7 +34,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_recruiter
 from app.db.session import get_db
+from app.integrations.llm.factory import get_default_provider
+from app.models.user import User
 from app.schemas.applicant import ApplicantIdentity
 from app.schemas.candidate import CandidateProfile
 from app.schemas.job import JobRequirementProfile
@@ -57,7 +60,7 @@ from app.services.persistence.application_repository import (
     get_or_create_candidate,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_recruiter)])
 
 
 class AnalyzeJDRequest(BaseModel):
@@ -94,7 +97,14 @@ def check_eligibility_endpoint(
     constraints: RecruiterConstraints,
 ) -> EligibilityResult:
     classified_reqs = classify_requirements(job_profile)
-    return check_eligibility(job_profile, classified_reqs, candidate, application, constraints)
+    return check_eligibility(
+        job_profile,
+        classified_reqs,
+        candidate,
+        application,
+        constraints,
+        provider=get_default_provider(),
+    )
 
 
 class SubmitApplicationRequest(BaseModel):
@@ -118,6 +128,7 @@ class SubmitApplicationResponse(BaseModel):
 def submit_application(
     request: SubmitApplicationRequest,
     db: Session = Depends(get_db),
+    recruiter: User = Depends(require_recruiter),
 ) -> SubmitApplicationResponse:
     try:
         job_profile = parse_job_description(request.jd_text)
@@ -126,6 +137,7 @@ def submit_application(
             job_title=request.job_title,
             raw_jd_text=request.jd_text,
             parsed_profile=job_profile,
+            created_by_user_id=recruiter.id,
         )
         candidate_profile = parse_cv(request.cv_text)
         candidate = get_or_create_candidate(db, request.applicant_identity)
@@ -136,6 +148,7 @@ def submit_application(
             candidate_profile,
             request.application_details,
             request.recruiter_constraints,
+            provider=get_default_provider(),
         )
         application = create_application(
             db,

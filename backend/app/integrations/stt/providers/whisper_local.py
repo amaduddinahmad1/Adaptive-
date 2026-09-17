@@ -3,13 +3,20 @@ Local faster-whisper STT provider (CPU-only, int8).
 
 Defaults to English (`language="en"`); pass STTConfig.language to override.
 Model size defaults to "small" via WHISPER_MODEL_SIZE for laptop CPU use.
+
+This environment does not have a working CUDA runtime, so the live worker
+stays on CPU. Decoding is tuned for already-VAD-segmented interview turns:
+one greedy pass, no temperature fallback retries, no inner VAD filter, and
+a token cap so hallucination loops cannot inflate turn latency.
 """
 from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import os
 import tempfile
+import threading
 import time
 import wave
 from typing import Any, AsyncIterator, Optional
@@ -17,13 +24,47 @@ from typing import Any, AsyncIterator, Optional
 from app.integrations.stt.base import STTProvider
 from app.schemas.stt import STTConfig, STTResult
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_MODEL_SIZE = "small"
 _DEFAULT_LANGUAGE = "en"
+_DEFAULT_DEVICE = "cpu"
+_DEFAULT_COMPUTE_TYPE = "int8"
 _CONTAINER_MAGIC = (b"RIFF", b"OggS", b"fLaC", b"ID3", b"\xff\xfb", b"\x1a\x45\xdf\xa3")
+
+# faster-whisper defaults temperature to [0.0, 0.2, ..., 1.0] and retries on
+# compression-ratio / log-prob thresholds. That extra decoding is the main
+# source of multi-second STT delay on clear interview answers.
+WHISPER_TRANSCRIBE_OPTIONS: dict[str, Any] = {
+    "task": "transcribe",
+    "beam_size": 1,
+    "best_of": 1,
+    "temperature": 0.0,
+    "vad_filter": False,
+    "condition_on_previous_text": False,
+    "without_timestamps": True,
+    "word_timestamps": False,
+    "multilingual": False,
+    "log_progress": False,
+    "max_new_tokens": 224,
+}
 
 
 def _resolve_language(config: STTConfig) -> str:
     return (config.language or "").strip() or _DEFAULT_LANGUAGE
+
+
+def resolve_whisper_cpu_threads() -> int:
+    """Use WHISPER_CPU_THREADS when set, otherwise all detected CPU threads."""
+    raw = (os.getenv("WHISPER_CPU_THREADS") or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return max(1, os.cpu_count() or 4)
 
 
 class WhisperModelLoadError(RuntimeError):
@@ -35,11 +76,26 @@ class WhisperLocalSTTProvider(STTProvider):
         self._model_size = (
             os.getenv("WHISPER_MODEL_SIZE", _DEFAULT_MODEL_SIZE).strip() or _DEFAULT_MODEL_SIZE
         )
+        self._device = _DEFAULT_DEVICE
+        self._compute_type = _DEFAULT_COMPUTE_TYPE
+        self._cpu_threads = resolve_whisper_cpu_threads()
         self._model: Optional[Any] = None
+        self._infer_lock = threading.Lock()
+
+    def model_runtime_info(self) -> dict[str, Any]:
+        return {
+            "model_size": self._model_size,
+            "device": self._device,
+            "compute_type": self._compute_type,
+            "cpu_threads": self._cpu_threads,
+            "model_loaded": self._model is not None,
+        }
 
     def _ensure_model(self) -> Any:
         if self._model is None:
-            self._model = self._load_model()
+            with self._infer_lock:
+                if self._model is None:
+                    self._model = self._load_model()
         return self._model
 
     def _load_model(self) -> Any:
@@ -53,7 +109,13 @@ class WhisperLocalSTTProvider(STTProvider):
             ) from exc
 
         try:
-            return WhisperModel(self._model_size, device="cpu", compute_type="int8")
+            model = WhisperModel(
+                self._model_size,
+                device=self._device,
+                compute_type=self._compute_type,
+                cpu_threads=self._cpu_threads,
+                num_workers=1,
+            )
         except Exception as exc:
             raise WhisperModelLoadError(
                 f"Failed to load Whisper model '{self._model_size}' on CPU. "
@@ -61,6 +123,14 @@ class WhisperLocalSTTProvider(STTProvider):
                 "or this machine may not have enough memory. "
                 f"Original error: {exc}"
             ) from exc
+        logger.info(
+            "Loaded Whisper model=%s device=%s compute_type=%s cpu_threads=%s",
+            self._model_size,
+            self._device,
+            self._compute_type,
+            self._cpu_threads,
+        )
+        return model
 
     async def transcribe(self, audio_data: bytes, config: STTConfig) -> STTResult:
         start = time.perf_counter()
@@ -85,15 +155,15 @@ class WhisperLocalSTTProvider(STTProvider):
             return "", None
 
         audio_input, temp_path = self._prepare_audio(audio_data, config)
+        model = self._ensure_model()
         try:
-            segments_iter, info = self._ensure_model().transcribe(
-                audio_input,
-                language=language,
-                task="transcribe",
-                beam_size=1,
-                vad_filter=True,
-            )
-            segments = list(segments_iter)
+            with self._infer_lock:
+                segments_iter, info = model.transcribe(
+                    audio_input,
+                    language=language,
+                    **WHISPER_TRANSCRIBE_OPTIONS,
+                )
+                segments = list(segments_iter)
         finally:
             if temp_path:
                 try:
@@ -105,6 +175,10 @@ class WhisperLocalSTTProvider(STTProvider):
         metadata = {
             "language": info.language,
             "segments": segments,
+            "model_size": self._model_size,
+            "device": self._device,
+            "compute_type": self._compute_type,
+            "cpu_threads": self._cpu_threads,
         }
         return text, metadata
 

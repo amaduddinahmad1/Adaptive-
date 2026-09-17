@@ -1,1 +1,18 @@
-/* TODO */
+.skill-bar { display: grid; gap: 6px; }
+.skill-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.skill-bar-label strong { color: var(--text); font-weight: 650; }
+.skill-bar-track {
+  height: 7px;
+  background: #0e1629;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.skill-bar-fill { height: 100%; border-radius: 99px; }
+.tone-green { background: linear-gradient(90deg, #22c55e, #3ddc97); }
+.tone-lavender { background: linear-gradient(90deg, #818cf8, #c0c1ff); }
+.tone-amber { background: linear-gradient(90deg, #f59e0b, #f5c16c); }

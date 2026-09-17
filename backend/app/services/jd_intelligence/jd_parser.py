@@ -20,6 +20,7 @@ from app.integrations.llm.gemini_provider import (
 )
 from app.integrations.llm.base import LLMProvider, LLMProviderError
 from app.schemas.job import JobRequirementProfile
+from app.services.jd_intelligence.requirement_classifier import is_willingness_to_learn_requirement
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,16 @@ Follow these critical disambiguation and classification rules:
 
 5. OTHER MANDATORY REQUIREMENTS:
    - Capture non-technical constraints (e.g., "Must be eligible to work in the US", "Willingness to work on-call rotations").
+   - Soft learning-attitude phrases such as "Willingness to learn", "Willingness to learn new tools",
+     "Eagerness to learn", or "Ability/willingness to learn" are NOT technical skills. Place them in
+     `other_mandatory_requirements`. Never place them in required_skills or required_technologies.
+
+6. SKILLS VS. TECHNOLOGIES (CONCEPTUAL DUPLICATES):
+   - Conceptual capabilities such as Machine Learning and Deep Learning belong in required_skills /
+     preferred_skills. Do not also list those same concepts independently in required_technologies
+     when they are already captured as skills.
+   - Named tools, languages, frameworks, and databases (Python, PyTorch, TensorFlow, PostgreSQL, Git)
+     belong in technologies and may remain there even if also mentioned as skills.
 
 Do not invent or assume requirements not mentioned in the text. Return only valid JSON conforming strictly to the requested schema.
 """
@@ -84,10 +95,11 @@ Do not invent or assume requirements not mentioned in the text. Return only vali
 # "Python"). Evidence-based, not exhaustive -- covers exactly what's been
 # observed in a real false positive plus the verbs named when this fix was
 # designed. Grow this list only when a real case shows up, same discipline
-# as _SKILL_EQUIVALENCE_GROUPS/_DEGREE_EQUIVALENCE_GROUPS in
-# eligibility_engine.py. Not applied to required_technologies/education/
-# certifications -- those are named tools/credentials, not free-text
-# sentences, and haven't shown this failure mode.
+# as SKILL_EQUIVALENCE_GROUPS in term_equivalence.py and
+# _DEGREE_EQUIVALENCE_GROUPS in eligibility_engine.py. Not applied to
+# required_technologies/education/certifications -- those are named
+# tools/credentials, not free-text sentences, and haven't shown this
+# failure mode.
 _DUTY_VERB_PATTERN = re.compile(
     r"^(collaborate|contribute|assist|participate|build|integrate|write|develop|design|maintain|support|manage|lead)\b",
     re.IGNORECASE,
@@ -109,6 +121,39 @@ def _filter_duty_shaped_requirements(profile: JobRequirementProfile) -> JobRequi
                 logger.warning("Filtered duty-shaped requirement out of %s: %r", field_name, item)
         setattr(profile, field_name, kept)
     return profile
+
+
+def _reclassify_soft_learning_requirements(profile: JobRequirementProfile) -> JobRequirementProfile:
+    """
+    Moves willingness/eagerness-to-learn phrases out of skill/technology lists
+    into other_mandatory_requirements (manual-review OTHER), matching the
+    classifier safety net for already-persisted job profiles.
+    """
+    moved: list[str] = []
+    for field_name in (
+        "required_skills",
+        "preferred_skills",
+        "required_technologies",
+        "preferred_technologies",
+    ):
+        original = getattr(profile, field_name)
+        kept = [item for item in original if not is_willingness_to_learn_requirement(item)]
+        moved.extend(item for item in original if is_willingness_to_learn_requirement(item))
+        setattr(profile, field_name, kept)
+
+    existing = {item.strip().lower() for item in profile.other_mandatory_requirements}
+    for item in moved:
+        key = item.strip().lower()
+        if key not in existing:
+            profile.other_mandatory_requirements.append(item)
+            existing.add(key)
+            logger.warning("Reclassified soft learning requirement as OTHER: %r", item)
+    return profile
+
+
+def _postprocess_parsed_profile(profile: JobRequirementProfile) -> JobRequirementProfile:
+    """Deterministic safety nets applied after LLM extraction."""
+    return _reclassify_soft_learning_requirements(_filter_duty_shaped_requirements(profile))
 
 
 class JDParserError(Exception):
@@ -191,7 +236,7 @@ class JDParser:
 
         # Attempt validation on initial output
         try:
-            return _filter_duty_shaped_requirements(JobRequirementProfile.model_validate_json(raw_text))
+            return _postprocess_parsed_profile(JobRequirementProfile.model_validate_json(raw_text))
         except ValidationError as first_val_err:
             # Schema validation failed on first attempt: execute retry once
             return self._retry_with_validation_feedback(
@@ -231,7 +276,7 @@ class JDParser:
             raise JDParserError(f"LLM error during extraction retry: {err}") from err
 
         try:
-            return _filter_duty_shaped_requirements(JobRequirementProfile.model_validate_json(retry_text))
+            return _postprocess_parsed_profile(JobRequirementProfile.model_validate_json(retry_text))
         except ValidationError as retry_val_err:
             raise JDParserError(
                 f"Schema validation failed after retry: {retry_val_err}"

@@ -1,1 +1,11 @@
-/* TODO */
+.error-state {
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  background: rgba(248, 113, 113, 0.08);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.error-state h3 { font-size: 15px; }
+.error-state p { color: var(--text-secondary); font-size: 13px; }

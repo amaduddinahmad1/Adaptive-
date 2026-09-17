@@ -8,7 +8,7 @@ is the sole source of truth for candidate and job identity.
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models.application import Application
+from app.models.application import HIRING_DECISION_REJECTED, Application
 from app.models.interview_result import InterviewResult
 from app.schemas.voice_session import InterviewStatus, ConnectionStatus
 from tests.conftest import make_mock_voice_service
@@ -88,6 +88,15 @@ def test_voice_session_http_lifecycle(client: TestClient, eligible_application: 
     completed_session = client.get(f"/api/v1/voice/sessions/{session_id}")
     assert completed_session.status_code == 200
     assert completed_session.json()["interview_status"] == InterviewStatus.COMPLETED
+
+    restart = client.post(f"/api/v1/voice/sessions/{session_id}/start")
+    assert restart.status_code == 400
+    opening = client.get(
+        f"/api/v1/voice/sessions/{session_id}/next-question",
+        params={"claim_opening": "true", "owner_id": "job-late"},
+    ).json()
+    assert opening["allow_opening_speech"] is False
+    assert opening["question"] is None
 
 
 JOIN_CONTRACT_FIELDS = {
@@ -267,7 +276,22 @@ def test_start_initializes_real_question_engine_over_http(
     ).json()
     assert question_body["question"] == expected[0].question_text
     assert question_body["question"] != "Could you tell me about yourself?"
+    assert question_body["allow_opening_speech"] is False
     assert db_session.query(InterviewResult).count() == interview_result_count
+
+    first_open = client.get(
+        f"/api/v1/voice/sessions/{session_id}/next-question",
+        params={"claim_opening": "true", "owner_id": "job-1"},
+    ).json()
+    second_open = client.get(
+        f"/api/v1/voice/sessions/{session_id}/next-question",
+        params={"claim_opening": "true", "owner_id": "job-2"},
+    ).json()
+    assert first_open["allow_opening_speech"] is True
+    assert first_open["question"] == expected[0].question_text
+    assert second_open["allow_opening_speech"] is False
+    assert second_open["action"] == "stand_down"
+    assert second_open["question"] == expected[0].question_text
 
 
 def _patch_http_assess_answers(weighted_total: float = 72.0):
@@ -408,3 +432,111 @@ def test_http_ineligible_application_end_does_not_persist(
     assert body["assessment_status"] == "not_persistable"
     assert "not eligible" in body["detail"]
     assert db_session.query(InterviewResult).count() == before
+
+
+def test_start_marks_invitation_token_used(
+    client: TestClient, db_session, eligible_application: Application
+):
+    from app.services.persistence.application_repository import generate_interview_token
+
+    generate_interview_token(db_session, eligible_application)
+    db_session.commit()
+    db_session.refresh(eligible_application)
+    assert eligible_application.token_used is False
+
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    client.post(f"/api/v1/voice/sessions/{created['session_id']}/start")
+
+    db_session.refresh(eligible_application)
+    assert bool(eligible_application.token_used) is True
+
+
+def test_create_session_rejects_expired_invitation(
+    client: TestClient, db_session, eligible_application: Application
+):
+    from datetime import datetime, timedelta, timezone
+
+    eligible_application.interview_token = "expired-session-token"
+    eligible_application.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    )
+    assert response.status_code == 400
+    assert "expired" in response.json()["detail"].lower()
+
+
+def test_create_session_rejects_completed_interview(
+    client: TestClient, db_session, eligible_application: Application
+):
+    db_session.add(
+        InterviewResult(
+            application_id=eligible_application.id,
+            final_report={},
+            recommendation="Hire",
+            interview_eligibility_result="Pass",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    )
+    assert response.status_code == 409
+    assert "already been completed" in response.json()["detail"]
+
+
+def test_create_session_rejects_rejected_application(
+    client: TestClient, db_session, eligible_application: Application
+):
+    eligible_application.hiring_decision = HIRING_DECISION_REJECTED
+    db_session.commit()
+    response = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    )
+    assert response.status_code == 400
+    assert "rejected" in response.json()["detail"].lower()
+    assert app.state.voice_service.session_manager.list_sessions() == []
+
+
+def test_start_rejects_rejected_application_before_interview_begins(
+    client: TestClient, db_session, eligible_application: Application
+):
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    eligible_application.hiring_decision = HIRING_DECISION_REJECTED
+    db_session.commit()
+    response = client.post(f"/api/v1/voice/sessions/{created['session_id']}/start")
+    assert response.status_code == 400
+    assert "rejected" in response.json()["detail"].lower()
+
+
+def test_start_question_engine_crash_fails_without_exposing_traceback(
+    client: TestClient, eligible_application: Application, monkeypatch
+):
+    def _crash(*args, **kwargs):
+        raise IndexError("list index out of range")
+
+    monkeypatch.setattr(
+        "app.integrations.pipecat.interview_bridge.generate_questions",
+        _crash,
+    )
+    created = client.post(
+        "/api/v1/voice/sessions",
+        json=_create_payload(eligible_application),
+    ).json()
+    response = client.post(f"/api/v1/voice/sessions/{created['session_id']}/start")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"] == "The interview session is unavailable right now."
+    assert "IndexError" not in str(body)
+    assert "Traceback" not in str(body)

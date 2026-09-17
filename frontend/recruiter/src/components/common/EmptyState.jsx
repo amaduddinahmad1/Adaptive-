@@ -1,10 +1,12 @@
 import './EmptyState.css';
-export default function EmptyState({ title, description, icon }) {
+
+export default function EmptyState({ title, description, icon, action }) {
   return (
     <div className="empty-state">
-      <div className="empty-state-icon">{icon || '✨'}</div>
+      {icon ? <div className="empty-state-icon">{icon}</div> : null}
       <h3 className="empty-state-title">{title}</h3>
-      <p className="empty-state-description">{description}</p>
+      {description ? <p className="empty-state-description">{description}</p> : null}
+      {action}
     </div>
   );
 }

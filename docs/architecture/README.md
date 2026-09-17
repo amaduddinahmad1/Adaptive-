@@ -1,5 +1,7 @@
 # System Architecture
 
+Runtime setup, environment variables, and demo startup commands are in the root [README.md](../../README.md).
+
 ## High-Level Pipeline
 
 ```

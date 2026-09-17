@@ -72,6 +72,12 @@ A candidate with "TensorFlow" or "PyTorch" listed, or a job title like
 project descriptions, DOES provide genuine evidence for "Machine Learning"
 and/or "Deep Learning" as appropriate.
 
+Explicit Generative AI / RAG evidence includes listed skills, technologies,
+or project text such as RAG, Retrieval-Augmented Generation, LangChain, LLM,
+Llama, or a RAG chatbot/agent project. That evidence CAN satisfy a mandatory
+Generative AI and/or RAG requirement. Do NOT treat generic NLP, computer
+vision, or unspecified "AI" work as Generative AI by itself.
+
 Provide a one-sentence, specific, evidence-citing reason for every
 judgment -- name the exact title/technology/project text that drove your
 decision, whether matched=true or matched=false. Never fabricate evidence

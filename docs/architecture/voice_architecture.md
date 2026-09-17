@@ -2,7 +2,9 @@
 
 ## Overview
 
-The voice interview system enables real-time, adaptive voice interviews between an AI interviewer and candidates. It coordinates Speech-to-Text (STT), Text-to-Speech (TTS), and Interview Intelligence through a clean orchestration layer.
+This document describes the original voice-layer split (LiveKit transport, orchestration, Interview Intelligence). Runtime startup commands, current STT/TTS providers, and the LiveKit Agents worker entrypoint are in the root [README.md](../../README.md).
+
+`MockInterviewBridge` remains a test double only. The production voice path uses `InterviewIntelligenceBridge` in the API process and `HttpInterviewBridge` in `python -m app.agents.worker`.
 
 ## Pipeline
 

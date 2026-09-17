@@ -7,6 +7,7 @@ import ConnectionStatus from '../components/interview/ConnectionStatus';
 import InterviewControls from '../components/interview/InterviewControls';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import Button from '../components/common/Button';
+import EmptyState from '../components/common/EmptyState';
 import AmbientSurface from '../components/common/AmbientSurface';
 import { useInterview } from '../hooks/useInterview';
 import { useFullscreenEnforcement } from '../hooks/useFullscreenEnforcement';
@@ -17,7 +18,7 @@ const preventCopy = (event) => {
   event.preventDefault();
 };
 
-const InterviewPage = ({ onComplete }) => {
+const InterviewPage = ({ onComplete, applicationId, candidateName, jobTitle }) => {
   const {
     status,
     connection,
@@ -28,8 +29,9 @@ const InterviewPage = ({ onComplete }) => {
     totalQuestions,
     transcript,
     elapsedTime,
+    startError,
     actions
-  } = useInterview();
+  } = useInterview({ applicationId, candidateName, jobTitle });
 
   const interviewActive =
     status === INTERVIEW_STATUS.IN_PROGRESS || status === INTERVIEW_STATUS.PAUSED;
@@ -133,6 +135,21 @@ const InterviewPage = ({ onComplete }) => {
       </div>
     ) : null;
 
+  if (status === INTERVIEW_STATUS.NOT_STARTED && connection === CONNECTION_STATUS.FAILED) {
+    return (
+      <div className="relative z-0 flex h-screen flex-col items-center justify-center gap-4 bg-ink px-8 font-sans text-text">
+        <EmptyState
+          title="Interview unavailable"
+          description={
+            startError
+            || 'The interview could not be started. Confirm the backend, LiveKit, and voice worker are running, then try again.'
+          }
+        />
+        <Button onClick={actions.retryConnection}>Try again</Button>
+      </div>
+    );
+  }
+
   if (status === INTERVIEW_STATUS.NOT_STARTED && connection !== CONNECTION_STATUS.FAILED) {
     return (
       <div className="relative z-0 flex h-screen flex-col items-center justify-center gap-4 bg-ink font-sans text-text-muted">
@@ -161,7 +178,7 @@ const InterviewPage = ({ onComplete }) => {
           <AmbientSurface variant="stage" />
           <div className="relative z-10 flex min-h-0 flex-1 select-none items-center" onCopy={preventCopy}>
             <QuestionDisplay
-              key={currentQuestion?.id ?? currentQuestionNumber}
+              key={currentQuestion?.text ?? currentQuestionNumber ?? 'question'}
               question={currentQuestion}
               number={currentQuestionNumber}
               total={totalQuestions}

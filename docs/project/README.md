@@ -2,57 +2,52 @@
 
 ## Adaptive Multimodal AI Interview & Candidate Assessment System
 
-This project builds an **AI-powered interview and assessment platform** that automates candidate screening, conducts adaptive voice interviews, and generates comprehensive assessment reports for recruiters.
+This project is an **AI-assisted interview and assessment platform**. It screens candidates against a job description, conducts an adaptive voice interview, and stores a real assessment report for a human recruiter.
 
-### Core Capabilities
+Setup, environment variables, startup commands, and the demo walkthrough live in the root [README.md](../../README.md). This file is a short project map only.
 
-- **JD Intelligence**: Analyze job descriptions to extract structured requirement profiles.
-- **CV Intelligence**: Parse candidate resumes to build candidate profiles.
-- **Eligibility Engine**: Screen candidates against job requirements before interview.
-- **Adaptive Voice Interview**: Conduct real-time voice interviews with adaptive question difficulty.
-- **Assessment & Scoring**: Generate skill scores, gap analysis, and comprehensive reports.
-- **Recruiter Dashboard**: Present assessment results for human decision-making.
+### Core capabilities
 
-### Key Principles
+- **JD Intelligence**: Parse job descriptions into structured requirement profiles.
+- **CV Intelligence**: Parse candidate resumes into candidate profiles.
+- **Eligibility Engine**: Screen candidates before interview.
+- **Adaptive voice interview**: LiveKit transport, local Whisper STT, Interview Intelligence, ElevenLabs TTS (local fallback).
+- **Assessment & scoring**: Persist `InterviewResult` from genuine evaluations only.
+- **Recruiter dashboard**: Pipeline, jobs, assessment reports, in-memory sessions, derived analytics.
+
+### Key principles
 
 - AI assists, humans decide — final hiring decisions remain with the recruiter.
-- Provider/model agnostic integrations for STT, TTS, and LLM.
-- Shared contracts define integration boundaries between team members.
-- Observable behavioral indicators only — no psychological labels.
 - No facial analysis or autonomous hiring decisions.
+- `MockInterviewBridge` is not used on the real interview path.
 
 ### Team
 
 | Member | Responsibilities |
 |--------|------------------|
 | **Amad** | JD Intelligence, CV Intelligence, Eligibility Engine |
-| **Faizan** | Interview Intelligence, Question Generation, Adaptive Difficulty, Assessment, Gap Analysis |
-| **Jazib** | Voice Interview (LiveKit + Pipecat), STT, TTS, Candidate UI, Recruiter Dashboard |
+| **Faizan** | Interview Intelligence, question generation, adaptive difficulty, assessment, gap analysis |
+| **Jazib** | Voice interview (LiveKit + worker + STT/TTS), candidate UI, recruiter dashboard |
 
-### Progress Tracker
+### Progress tracker
 
 | Phase | Status |
 |-------|--------|
-| Project Structure | ✅ Complete |
-| Shared Contracts | ✅ Complete |
-| Voice Foundation (Jazib Day 1) | ✅ Complete |
-| Candidate Interview UI | ✅ Complete |
-| Recruiter Dashboard Shell | ✅ Complete |
-| JD Intelligence (Amad) | ⬜ Not Started |
-| CV Intelligence (Amad) | ⬜ Not Started |
-| Eligibility Engine (Amad) | ⬜ Not Started |
-| Interview Intelligence (Faizan) | ⬜ Not Started |
-| Assessment & Scoring (Faizan) | ⬜ Not Started |
-| Real STT/TTS Integration | ⬜ Not Started |
-| Real LiveKit Integration | ⬜ Not Started |
-| Real Pipecat Integration | ⬜ Not Started |
-| Database Persistence | ⬜ Not Started |
-| Authentication | ⬜ Not Started |
+| Shared contracts | Complete |
+| JD / CV / eligibility | Complete |
+| Application persistence + 48h invitations | Complete |
+| Recruiter dashboard (live API) | Complete |
+| Candidate apply + interview UI | Complete |
+| Real Interview Intelligence on the voice path | Complete |
+| Assessment persistence (`InterviewResult`) | Complete |
+| LiveKit Agents worker + Whisper STT + ElevenLabs TTS | Complete |
+| Authentication | Out of scope for the current demo |
+| Phase 6 demo documentation / polish | Complete |
 
-### Architecture Documentation
+### Architecture documentation
 
-See [docs/architecture/](../architecture/) for detailed system and voice architecture documentation.
+See [docs/architecture/](../architecture/) for the original system diagram. Runtime commands and current providers are documented in the root README.
 
-### API Documentation
+### API documentation
 
-See [docs/api/](../api/) for endpoint documentation.
+Interactive OpenAPI: `http://localhost:8000/docs` when the backend is running. See also [docs/api/](../api/).

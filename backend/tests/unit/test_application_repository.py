@@ -14,8 +14,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.models.application import Application
-from app.services.persistence.application_repository import generate_interview_token, mark_invitation_sent
+from app.models.application import HIRING_DECISION_REJECTED, Application
+from app.services.persistence.application_repository import (
+    generate_interview_token,
+    mark_invitation_sent,
+    mark_interview_token_used,
+    set_application_hiring_decision,
+)
 
 
 def _make_eligible_application(**overrides) -> Application:
@@ -74,6 +79,7 @@ def test_allows_regeneration_when_existing_token_was_already_used():
     generate_interview_token(MagicMock(), application)
 
     assert application.interview_token != "used-token"
+    assert application.token_used is False
 
 
 def test_successful_generation_sets_token_and_48_hour_expiry():
@@ -85,6 +91,7 @@ def test_successful_generation_sets_token_and_48_hour_expiry():
 
     assert application.interview_token is not None
     assert len(application.interview_token) > 20  # secrets.token_urlsafe(32) -- ~43 chars
+    assert application.token_used is False
     assert (before + timedelta(hours=48)) <= application.token_expires_at <= (after + timedelta(hours=48))
 
 
@@ -128,3 +135,32 @@ def test_mark_invitation_sent_sets_email_sent_at_and_flushes():
     assert before <= application.email_sent_at <= after
     db.flush.assert_called_once()
     db.commit.assert_not_called()
+
+
+def test_mark_interview_token_used_sets_flag_and_flushes():
+    application = _make_eligible_application(token_used=False)
+    db = MagicMock()
+
+    mark_interview_token_used(db, application)
+
+    assert application.token_used is True
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+
+
+def test_set_application_hiring_decision_is_idempotent():
+    application = _make_eligible_application(hiring_decision="pending")
+    db = MagicMock()
+    set_application_hiring_decision(db, application, "rejected")
+    assert application.hiring_decision == HIRING_DECISION_REJECTED
+    db.flush.assert_called_once()
+    db.commit.assert_not_called()
+    set_application_hiring_decision(db, application, "rejected")
+    assert application.hiring_decision == HIRING_DECISION_REJECTED
+    assert db.flush.call_count == 1
+
+
+def test_set_application_hiring_decision_rejects_unsupported_values():
+    application = _make_eligible_application(hiring_decision="pending")
+    with pytest.raises(ValueError, match="Unsupported hiring decision"):
+        set_application_hiring_decision(MagicMock(), application, "accepted")

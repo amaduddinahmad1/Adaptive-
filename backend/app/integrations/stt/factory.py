@@ -1,12 +1,16 @@
 """
 Factory for STT Providers.
 """
+import logging
 import os
+import threading
 from typing import Dict, Optional, Type
 
 from app.integrations.stt.base import STTProvider
 from app.integrations.stt.mock_provider import MockSTTProvider
 from app.integrations.stt.providers.whisper_local import WhisperLocalSTTProvider
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PROVIDER = "whisper_local"
 
@@ -17,6 +21,7 @@ class STTProviderFactory:
         "whisper_local": WhisperLocalSTTProvider,
     }
     _instances: Dict[str, STTProvider] = {}
+    _init_lock = threading.Lock()
 
     @classmethod
     def register_provider(cls, name: str, provider_class: Type[STTProvider]):
@@ -35,9 +40,24 @@ class STTProviderFactory:
         cached = cls._instances.get(name)
         if cached is not None:
             return cached
-        provider_class = cls._providers.get(name)
-        if not provider_class:
-            raise ValueError(f"Unknown STT provider: {provider_name or name}")
-        instance = provider_class()
-        cls._instances[name] = instance
-        return instance
+        with cls._init_lock:
+            cached = cls._instances.get(name)
+            if cached is not None:
+                return cached
+            provider_class = cls._providers.get(name)
+            if not provider_class:
+                raise ValueError(f"Unknown STT provider: {provider_name or name}")
+            instance = provider_class()
+            cls._instances[name] = instance
+            return instance
+
+
+def warmup_whisper_model() -> None:
+    """Load the local Whisper weights in the worker process before LiveKit connect."""
+    try:
+        provider = STTProviderFactory.get_provider("whisper_local")
+        ensure = getattr(provider, "_ensure_model", None)
+        if callable(ensure):
+            ensure()
+    except Exception:
+        logger.warning("Whisper STT prewarm skipped", exc_info=True)

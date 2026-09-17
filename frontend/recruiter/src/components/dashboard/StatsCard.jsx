@@ -1,15 +1,18 @@
 import './StatsCard.css';
-export default function StatsCard({ title, value, trend, icon }) {
+
+export default function StatsCard({ title, value, hint, icon, empty }) {
   return (
-    <div className="stats-card">
-      <div className="stats-info">
-        <div className="stats-title">{title}</div>
-        <div className="stats-value">{value}</div>
-        <div className={`stats-trend ${trend >= 0 ? 'positive' : 'negative'}`}>
-          {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}% from last month
-        </div>
+    <article className={`metric-card${empty ? ' is-empty' : ''}`}>
+      <div className="metric-top">
+        <span className="eyebrow">{title}</span>
+        {icon ? <span className="metric-icon">{icon}</span> : null}
       </div>
-      <div className="stats-icon">{icon}</div>
-    </div>
+      {empty ? (
+        <div className="metric-empty">No backend data</div>
+      ) : (
+        <div className="metric-value">{value}</div>
+      )}
+      {hint ? <div className="metric-hint">{hint}</div> : null}
+    </article>
   );
 }

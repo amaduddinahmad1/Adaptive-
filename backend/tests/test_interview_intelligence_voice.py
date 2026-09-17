@@ -310,7 +310,7 @@ def test_voice_agent_default_bridge_is_http_not_mock():
     from unittest.mock import MagicMock, patch as patch_fn
 
     with patch_fn("app.agents.interview_agent.Agent.__init__", return_value=None), patch_fn(
-        "app.agents.interview_agent.WhisperLocalSTTProvider", return_value=MagicMock()
+        "app.agents.interview_agent.STTProviderFactory.get_provider", return_value=MagicMock()
     ):
         agent = InterviewAgent()
 

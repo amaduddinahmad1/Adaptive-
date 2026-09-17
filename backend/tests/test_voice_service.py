@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import jwt
 import pytest
-from app.models.application import Application
+from app.models.application import HIRING_DECISION_REJECTED, Application
 from app.services.voice.service import VoiceInterviewService
 from app.schemas.voice_session import InterviewStatus, ConnectionStatus
 from app.integrations.livekit.config import LiveKitConfig
@@ -208,3 +208,45 @@ async def test_create_session_does_not_query_db_again(
     assert session.application_id == eligible_application.id
     assert db_session.query(Application).count() == application_count
     assert service.session_manager.get_session(session.session_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_start_interview_does_not_delete_livekit_room(
+    eligible_application: Application,
+):
+    service = make_mock_voice_service()
+    with patch.object(service.livekit, "delete_room", new_callable=AsyncMock) as delete_spy:
+        session = await service.create_session(eligible_application)
+        await service.start_interview(session.session_id, application=eligible_application)
+        delete_spy.assert_not_awaited()
+        await service.end_interview(session.session_id)
+        delete_spy.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_rejected_application(
+    eligible_application: Application,
+):
+    eligible_application.hiring_decision = HIRING_DECISION_REJECTED
+    service = make_mock_voice_service()
+    with pytest.raises(ValueError, match="rejected"):
+        await service.create_session(eligible_application)
+
+
+@pytest.mark.asyncio
+async def test_start_blocks_rejected_application_unless_already_in_progress(
+    eligible_application: Application,
+):
+    service = make_mock_voice_service()
+    session = await service.create_session(eligible_application)
+    eligible_application.hiring_decision = HIRING_DECISION_REJECTED
+    with pytest.raises(ValueError, match="rejected"):
+        await service.start_interview(session.session_id, application=eligible_application)
+
+    eligible_application.hiring_decision = "pending"
+    await service.start_interview(session.session_id, application=eligible_application)
+    eligible_application.hiring_decision = HIRING_DECISION_REJECTED
+    again = await service.start_interview(
+        session.session_id, application=eligible_application
+    )
+    assert again["status"] == "started"
